@@ -1,21 +1,16 @@
-"""Standalone LLM provider layer for the frontier fact-check benchmark.
+"""LLM provider layer for the frontier fact-check benchmark.
 
-Extracted from the Lenz pipeline (lenz/llm.py) with all Django/ORM
-dependencies removed. Supports the five v1.1 benchmark providers:
-Anthropic, OpenAI Responses, Perplexity, xAI Responses, and Gemini.
+Supports five providers: Anthropic, OpenAI Responses, Perplexity,
+xAI Responses, and Gemini. No external dependencies beyond the
+provider SDKs.
 """
 
 from __future__ import annotations
 
-import json
-import logging
 import os
 import re
-import time
 from abc import ABC, abstractmethod
 from typing import Any
-
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Timeouts and defaults
@@ -35,6 +30,7 @@ DEFAULT_MAX_TOKENS = 800
 
 MODEL_PRICING_EUR: dict[str, tuple[float, float]] = {
     'claude-opus-4': (4.25, 21.25),
+    'claude-fable-5': (8.50, 42.50),  # $10 / $50 — 2x Opus 4.8; thinking always on, billed as output
     'gpt-5.5': (4.25, 25.50),
     'gemini-3.1-pro': (1.70, 10.20),
     'sonar-deep-research': (1.70, 6.80),
@@ -49,6 +45,11 @@ def _lookup_pricing(model: str) -> tuple[float, float]:
         if model.startswith(prefix) and len(prefix) > len(best_prefix):
             best_prefix = prefix
             best_prices = prices
+    if not best_prefix:
+        # Silent €0.00 here means a renamed/unrecognized model's entire cost
+        # column reads zero with no signal — loud enough to be seen in the
+        # per-cell harvest.py output, not just a swallowed log line.
+        print(f'WARNING: no pricing entry for model {model!r} — cost will read as €0.00')
     return best_prices
 
 
@@ -101,14 +102,28 @@ class LLMProvider(ABC):
         self.max_tokens = max_tokens
         self.extra = extra
         self.last_usage: dict | None = None
+        self.last_sources: list[str] = []
 
     @property
     def supports_json_schema(self) -> bool:
         return False
 
+    @property
+    def excluded_domains(self) -> list[str] | None:
+        """Domains the provider's web search / grounding tool must never surface.
+
+        Set via the ``excluded_domains`` extra. Each provider wires this into
+        its own native domain-block mechanism (Anthropic/OpenAI/xAI/Gemini/
+        Perplexity use different field names — see their ``_complete_inner``).
+        API-enforced, unlike a prompt instruction.
+        """
+        value = self.extra.get('excluded_domains')
+        return list(value) if value else None
+
     def complete(self, system: str, user: str, *, json_schema: dict | None = None,
                  max_tokens: int | None = None) -> str:
         self.last_usage = None
+        self.last_sources = []
         return self._complete_inner(system, user, json_schema=json_schema, max_tokens=max_tokens)
 
     @abstractmethod
@@ -124,11 +139,15 @@ class LLMProvider(ABC):
 
 
 # ---------------------------------------------------------------------------
-# Anthropic — claude-opus-4-8 with adaptive thinking + web search
+# Anthropic — claude-fable-5 with adaptive thinking + web search
 # ---------------------------------------------------------------------------
 
 class AnthropicProvider(LLMProvider):
-    _OMIT_TEMPERATURE_MODELS = ('claude-opus-4-7', 'claude-opus-4-8')
+    # Models that 400 on temperature/top_p/top_k AND on
+    # thinking={'type': 'enabled', 'budget_tokens': N}. claude-fable-5:
+    # thinking is always on — {'type': 'adaptive'} is the only accepted
+    # explicit form ('disabled' also 400s, unlike Opus 4.7/4.8).
+    _OMIT_TEMPERATURE_MODELS = ('claude-opus-4-7', 'claude-opus-4-8', 'claude-fable-5')
 
     def _client(self):
         import anthropic
@@ -177,23 +196,31 @@ class AnthropicProvider(LLMProvider):
         if not self._omit_temperature:
             kwargs['temperature'] = self.temperature
 
-        output_config: dict[str, Any] = {}
-        if self._effort:
-            output_config['effort'] = self._effort
-
         if self._thinking_budget is not None:
             if self._use_adaptive_thinking:
                 kwargs['thinking'] = {'type': 'adaptive'}
             else:
                 kwargs['thinking'] = {'type': 'enabled', 'budget_tokens': self._thinking_budget}
-            if self._web_search:
-                kwargs['tools'] = [{'type': 'web_search_20260209', 'name': 'web_search'}]
-            if json_schema and self._schema_with_thinking:
-                output_config['format'] = {
-                    'type': 'json_schema',
-                    'schema': _strip_anthropic_int_bounds(json_schema),
-                }
-        elif json_schema:
+
+        # web_search (and the excluded_domains contamination guard riding on
+        # it) is independent of thinking. Previously this was nested inside
+        # `if self._thinking_budget is not None`, which meant removing
+        # thinking_budget from a provider config would silently also drop
+        # retrieval AND the domain-block guard with no error — a model could
+        # then rediscover its own source claims via search with nothing
+        # stopping it.
+        if self._web_search:
+            tool: dict[str, Any] = {'type': 'web_search_20260209', 'name': 'web_search'}
+            if self.excluded_domains:
+                tool['blocked_domains'] = self.excluded_domains
+            kwargs['tools'] = [tool]
+
+        output_config: dict[str, Any] = {}
+        if self._effort:
+            output_config['effort'] = self._effort
+        # supports_json_schema already encodes "format is safe to send" —
+        # thinking off, or schema_with_thinking explicitly opted in.
+        if json_schema and self.supports_json_schema:
             output_config['format'] = {
                 'type': 'json_schema',
                 'schema': _strip_anthropic_int_bounds(json_schema),
@@ -207,10 +234,25 @@ class AnthropicProvider(LLMProvider):
             'input_tokens': msg.usage.input_tokens,
             'output_tokens': msg.usage.output_tokens,
         }
-        texts = [block.text for block in msg.content if getattr(block, 'type', '') == 'text']
+        sources: list[str] = []
+        texts: list[str] = []
+        for block in msg.content:
+            btype = getattr(block, 'type', '')
+            if btype == 'text':
+                texts.append(block.text)
+            elif btype == 'web_search_tool_result':
+                for item in (getattr(block, 'content', None) or []):
+                    url = getattr(item, 'url', None)
+                    if url and isinstance(url, str) and url not in sources:
+                        sources.append(url)
+        self.last_sources = sources
         text = '\n'.join(texts) if texts else ''
         if not text:
-            raise RuntimeError(f'Anthropic returned empty response (model={self.model})')
+            # Include stop_reason: Fable 5's safety classifiers return an empty
+            # response with stop_reason='refusal' — downstream grading keys off
+            # the word 'refusal' in this message to count abstains correctly.
+            stop_reason = getattr(msg, 'stop_reason', 'unknown') or 'unknown'
+            raise RuntimeError(f'Anthropic returned empty response (finish_reason={stop_reason}, model={self.model})')
         return text
 
 
@@ -220,6 +262,11 @@ class AnthropicProvider(LLMProvider):
 
 class OpenAIResponsesProvider(LLMProvider):
     _FIXED_TEMPERATURE_MODELS = {'gpt-5.4', 'gpt-5.5', 'gpt-5-nano', 'o1', 'o1-mini', 'o3', 'o3-mini'}
+
+    # OpenAI's web_search tool names its domain-blocklist field
+    # `blocked_domains`. xAI's Responses API mirrors this tool shape but
+    # calls the same field `excluded_domains` — XAIResponsesProvider overrides.
+    _domain_filter_key: str = 'blocked_domains'
 
     @property
     def supports_json_schema(self) -> bool:
@@ -263,6 +310,8 @@ class OpenAIResponsesProvider(LLMProvider):
             tool: dict = {'type': 'web_search'}
             if 'search_context_size' in self.web_search:
                 tool['search_context_size'] = self.web_search['search_context_size']
+            if self.excluded_domains:
+                tool['filters'] = {self._domain_filter_key: self.excluded_domains}
             kwargs['tools'] = [tool]
             kwargs['tool_choice'] = 'auto'
         if self.reasoning_effort:
@@ -274,6 +323,15 @@ class OpenAIResponsesProvider(LLMProvider):
                 'input_tokens': resp.usage.input_tokens,
                 'output_tokens': resp.usage.output_tokens,
             }
+        sources: list[str] = []
+        for item in (getattr(resp, 'output', None) or []):
+            if getattr(item, 'type', '') == 'message':
+                for block in (getattr(item, 'content', None) or []):
+                    for ann in (getattr(block, 'annotations', None) or []):
+                        url = getattr(ann, 'url', None)
+                        if url and isinstance(url, str) and url not in sources:
+                            sources.append(url)
+        self.last_sources = sources
         status = getattr(resp, 'status', 'unknown')
         output_text = getattr(resp, 'output_text', '') or ''
         if status != 'completed' or not output_text:
@@ -315,12 +373,19 @@ class PerplexityProvider(LLMProvider):
                 'type': 'json_schema',
                 'json_schema': {'name': 'verdict', 'schema': json_schema},
             }
+        if self.excluded_domains:
+            # search_domain_filter isn't a recognized kwarg on the openai-python
+            # client's typed create() signature — it must go through extra_body,
+            # which the SDK merges into the raw request body verbatim.
+            # Hyphen-prefix denylists a domain.
+            kwargs['extra_body'] = {'search_domain_filter': [f'-{d}' for d in self.excluded_domains]}
         resp = client.chat.completions.create(**kwargs)
         if resp.usage:
             self.last_usage = {
                 'input_tokens': resp.usage.prompt_tokens,
                 'output_tokens': resp.usage.completion_tokens,
             }
+        self.last_sources = list(getattr(resp, 'citations', None) or [])
         content = resp.choices[0].message.content or ''
         if not content:
             raise RuntimeError(f'Perplexity returned empty response (model={self.model})')
@@ -332,6 +397,10 @@ class PerplexityProvider(LLMProvider):
 # ---------------------------------------------------------------------------
 
 class XAIResponsesProvider(OpenAIResponsesProvider):
+    # xAI's web_search tool names its domain-blocklist field
+    # `excluded_domains`, not OpenAI's `blocked_domains`.
+    _domain_filter_key: str = 'excluded_domains'
+
     def _client(self):
         import openai
         timeout = int(self.extra.get('request_timeout_ms') or OPENAI_TIMEOUT * 1000) / 1000
@@ -368,7 +437,12 @@ class GeminiProvider(LLMProvider):
     def _complete_inner(self, system: str, user: str, *, json_schema: dict | None = None,
                         max_tokens: int | None = None) -> str:
         from google.genai import types
-        tools = [types.Tool(google_search=types.GoogleSearch())] if self.search_grounding else []
+        tools = []
+        if self.search_grounding:
+            google_search_kwargs: dict[str, Any] = {}
+            if self.excluded_domains:
+                google_search_kwargs['exclude_domains'] = self.excluded_domains
+            tools = [types.Tool(google_search=types.GoogleSearch(**google_search_kwargs))]
         config_kwargs: dict[str, Any] = {
             'system_instruction': system,
             'temperature': self.temperature,
@@ -391,6 +465,16 @@ class GeminiProvider(LLMProvider):
             'output_tokens': (getattr(usage_meta, 'candidates_token_count', 0) or 0)
                 + (getattr(usage_meta, 'thoughts_token_count', 0) or 0),
         }
+        if self.search_grounding:
+            grounding_sources: list[str] = []
+            for cand in (getattr(resp, 'candidates', None) or []):
+                gm = getattr(cand, 'grounding_metadata', None)
+                for chunk in (getattr(gm, 'grounding_chunks', None) or []):
+                    web = getattr(chunk, 'web', None)
+                    uri = getattr(web, 'uri', None)
+                    if uri and isinstance(uri, str) and uri not in grounding_sources:
+                        grounding_sources.append(uri)
+            self.last_sources = grounding_sources
         if not resp.text:
             reason = 'unknown'
             if resp.candidates:
@@ -418,7 +502,7 @@ _PROVIDERS: dict[str, type[LLMProvider]] = {
     'gemini': GeminiProvider,
 }
 
-_STANDARD_KEYS = {'provider', 'model', 'api_key_env', 'temperature', 'max_tokens', 'min_max_tokens'}
+_STANDARD_KEYS = {'provider', 'api_model', 'api_key_env', 'temperature', 'max_tokens', 'min_max_tokens'}
 
 
 def build_provider(cfg: dict[str, Any], *, max_tokens: int = DEFAULT_MAX_TOKENS) -> LLMProvider:

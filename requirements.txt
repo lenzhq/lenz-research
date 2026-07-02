@@ -1,3 +1,5 @@
 anthropic>=0.57
 openai>=1.82
 google-genai>=1.16
+inspect-ai>=0.3
+python-dotenv>=1.0

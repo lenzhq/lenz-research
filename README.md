@@ -10,7 +10,7 @@ maximum thinking depth, live web retrieval, and native JSON schema enforcement.
 
 | Model | Provider | Thinking | Retrieval |
 |---|---|---|---|
-| claude-opus-4-8 | Anthropic | adaptive (effort=max) | web_search_20260209 |
+| claude-fable-5 | Anthropic | adaptive (effort=max) | web_search_20260209 |
 | gpt-5.5-search | OpenAI | reasoning_effort=xhigh | web search (high context) |
 | gemini-3-retrieval | Google | thinking_budget=32768 | Google Search grounding |
 | sonar-deep-research | Perplexity | built-in multi-step | always-on deep research |
@@ -18,24 +18,31 @@ maximum thinking depth, live web retrieval, and native JSON schema enforcement.
 
 ## Dataset
 
-`data/claims.jsonl` — 1,000 claims sampled from Lenz, one JSON object per line:
+`data/claims.json` — 1,000 claims sampled from Lenz, deliberately stripped of any
+Lenz-internal identifier (no `share_id`, no gold verdict) so this package stands
+alone. Claims were selected with pairwise embedding distance >= 0.10, so claim
+text is safe to use as a join key. A JSON array of records:
 
 ```json
-{"atomic_claim": "...", "domain": "Science", "conclusion_label": "True", "submission_date": "2026-03-14"}
+{"claim": "...", "date": "2026-03-14", "category": "Science"}
 ```
 
-`data/results.jsonl` — per-(claim × model) harvest outputs:
+`data/results.jsonl` — per-(claim × model) harvest outputs, one JSON object per line
+(streamed as the run progresses; `data/results.json` is the same rows as a final array):
 
 ```json
-{"share_id": "...", "model": "gpt-5.5-search", "verdict": "True", "reasoning": "...", "confidence": 9, "agrees_with_lenz": true, "cost_eur": 0.0042, "latency_s": 18.3}
+{"claim": "...", "date": "2026-03-14", "category": "Science", "model": "gpt-5.5-search", "verdict": "True", "reasoning": "...", "confidence": 9, "cost_eur": 0.0042, "latency_s": 18.3, "error": "", "raw_response": "...", "sources": ["https://..."]}
 ```
+
+An erroring cell carries the same shape with `verdict`/`confidence`/`raw_response`
+empty and `error` set to the exception message.
 
 ## Reproduce
 
 ```bash
-pip install anthropic openai google-genai
+pip install -r requirements.txt
 cp .env.example .env   # fill in your API keys
-python harvest.py --claims data/claims.jsonl --out data/my_results.jsonl
+python harvest.py --claims data/claims.json --out data/my_results.jsonl
 ```
 
 Results should match `data/results.jsonl` up to model non-determinism.
@@ -49,14 +56,15 @@ Evaluate this claim as of {date}:
 "{claim}"
 
 Choose exactly one verdict from the scale below:
-  "True"         — the claim is accurate and well-supported by evidence
+  "True"         — the claim is accurate
   "Mostly True"  — the claim is largely accurate with minor caveats or omissions
   "Mixed"        — the claim has both accurate and inaccurate elements
   "Mostly False" — the claim is largely inaccurate with some basis in fact
-  "False"        — the claim is inaccurate or unsupported by evidence
+  "False"        — the claim is inaccurate
 
 Respond with a JSON object containing exactly these fields:
-  "reasoning": 2-4 sentences of evidence-based analysis
+  "reasoning": 2-4 sentences of claim analysis and verdict justification
   "verdict":   one of the five labels above
-  "confidence_level": an integer from 1 to 10
+  "confidence_level": your level of certainty in the verdict on a 1 to 10 integer scale
+  (1 = completely uncertain, 10 = fully certain).
 ```

@@ -1,7 +1,9 @@
 """Frontier LLM fact-checking evaluation — Inspect AI task.
 
-Framework-standard evaluation that integrates with Inspect View
-for visualisation and produces reproducible logs.
+Primary harness for running the benchmark. Framework-standard evaluation
+that integrates with Inspect View for visualisation and produces
+reproducible logs. (harvest.py is kept as a backup path — plain-script,
+no framework dependency — in case Inspect itself is ever the blocker.)
 
 Input format — each record must have at minimum:
     claim    : str  — the claim text
@@ -17,13 +19,31 @@ Usage — one model at a time:
 
 View results:
     inspect view
+
+Bundled runs (inspect data/results.json between bundles) — one model, 50
+claims at a time. Inspect's --limit takes a 1-indexed, inclusive range
+(--limit 1-50 means samples 1 through 50, NOT 0-indexed like harvest.py's
+--offset/--limit) — all bundles write into the same data/results.jsonl:
+    inspect eval task.py -T model_key=claude-fable-5 --limit 1-50
+    inspect eval task.py -T model_key=claude-fable-5 --limit 51-100
+    inspect eval task.py -T model_key=claude-fable-5 --limit 101-150
+
+In addition to Inspect's own .eval log, every scored sample is also
+appended to data/results.jsonl and the deduped data/results.json snapshot
+is rewritten — byte-identical row shape to harvest.py's output, same
+default path, so compare.py and the Lenz DB import script read either
+harness's output interchangeably, and a later `harvest.py` resume run will
+correctly skip (claim, model) pairs already scored here. Override the path
+with `-T out_path=...` to keep a debugging run out of the shared file.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
@@ -152,6 +172,53 @@ def _parse_verdict(raw: str) -> tuple[str, int, str]:
         return '', 0, ''
 
 # ---------------------------------------------------------------------------
+# results.jsonl / results.json — same shape and dedup semantics as
+# harvest.py, so the two harnesses' output is interchangeable.
+# ---------------------------------------------------------------------------
+
+_write_lock = threading.Lock()
+
+
+def _append_and_resnapshot(row: dict, out_path: Path) -> None:
+    """Append `row` to out_path (jsonl) and rewrite the deduped .json
+    snapshot alongside it.
+
+    Recomputes the snapshot from the full jsonl on every call — not
+    incrementally in memory — so it's always correct even if the eval is
+    interrupted mid-run; no dependency on an "eval finished" hook. Cheap at
+    this dataset size (low hundreds of KB), same tradeoff harvest.py makes.
+
+    Lock covers the whole append+resnapshot: Inspect may run solver/scorer
+    calls across real OS threads (blocking synchronous SDK calls can't run
+    on a single asyncio event loop without serializing everything), so
+    concurrent scorer invocations can race on this file exactly like
+    harvest.py's ThreadPoolExecutor workers do.
+    """
+    with _write_lock:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with out_path.open('a', encoding='utf-8') as f:
+            f.write(json.dumps(row, ensure_ascii=False) + '\n')
+
+        rows: list[dict] = []
+        with out_path.open(encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue  # tolerate a truncated last line from a prior crash
+
+        # Last write wins per (claim, model) — matches harvest.py's
+        # results_by_cell dedup, so a re-scored cell doesn't duplicate.
+        deduped = list({(r.get('claim', ''), r.get('model', '')): r for r in rows}.values())
+        out_path.with_suffix('.json').write_text(
+            json.dumps(deduped, ensure_ascii=False, indent=2), encoding='utf-8'
+        )
+
+
+# ---------------------------------------------------------------------------
 # Solver — uses llm.py providers directly so all provider-specific config
 # (thinking, web search, reasoning effort) is preserved without remapping.
 # ---------------------------------------------------------------------------
@@ -204,9 +271,40 @@ def factcheck_solver(model_key: str = 'gpt-5.5-search'):
 # grade harvested verdicts.
 
 @scorer(metrics=[])
-def factcheck_scorer():
+def factcheck_scorer(out_path: str = 'data/results.jsonl'):
+    out = Path(out_path)
+
     async def score(state: TaskState, target: Target) -> Score:
-        verdict, confidence, reasoning = _parse_verdict(state.output.completion)
+        provider_error = state.metadata.get('error', '')
+
+        if provider_error:
+            # Mirrors harvest.py's `if error:` branch — provider call
+            # itself failed, so state.output.completion holds the error
+            # text (the solver's fallback content), not a model response.
+            # Don't parse it as one.
+            verdict, confidence, reasoning = '', 0, ''
+            raw_response = ''
+            row_error = provider_error
+        else:
+            raw_response = state.output.completion
+            verdict, confidence, reasoning = _parse_verdict(raw_response)
+            row_error = '' if verdict else 'parse_error'
+
+        row = {
+            'claim': state.metadata.get('claim', ''),
+            'date': state.metadata.get('date', ''),
+            'category': state.metadata.get('category', ''),
+            'model': state.metadata.get('model_key', ''),
+            'verdict': verdict,
+            'reasoning': reasoning,
+            'confidence': confidence,
+            'cost_eur': state.metadata.get('cost_eur', 0.0),
+            'latency_s': state.metadata.get('latency_s', 0.0),
+            'error': row_error,
+            'raw_response': raw_response,
+            'sources': state.metadata.get('sources', []),
+        }
+        _append_and_resnapshot(row, out)
 
         return Score(
             value=verdict or '(parse error)',
@@ -224,7 +322,7 @@ def factcheck_scorer():
                 'cost_eur': state.metadata.get('cost_eur', 0.0),
                 'latency_s': state.metadata.get('latency_s', 0.0),
                 'sources': state.metadata.get('sources', []),
-                'error': state.metadata.get('error', ''),
+                'error': row_error,
                 'reasoning': reasoning,
                 'model_key': state.metadata.get('model_key', ''),
                 'category': state.metadata.get('category', ''),
@@ -241,9 +339,10 @@ def factcheck_scorer():
 def factcheck(
     model_key: str = 'gpt-5.5-search',
     claims_file: str = 'data/claims.json',
+    out_path: str = 'data/results.jsonl',
 ):
     return Task(
         dataset=json_dataset(claims_file, _record_to_sample),
         solver=factcheck_solver(model_key=model_key),
-        scorer=factcheck_scorer(),
+        scorer=factcheck_scorer(out_path=out_path),
     )

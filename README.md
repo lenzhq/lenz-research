@@ -39,11 +39,43 @@ empty and `error` set to the exception message.
 
 ## Reproduce
 
+Primary path is `task.py` via [Inspect AI](https://inspect.aisi.org.uk/) — one
+model per invocation, with Inspect's own transcript viewer for stepping
+through a run turn-by-turn:
+
 ```bash
 pip install -r requirements.txt
 cp .env.example .env   # fill in your API keys
-python harvest.py --claims data/claims.json --out data/my_results.jsonl
+inspect eval task.py -T model_key=claude-fable-5
+inspect view
 ```
+
+Every scored sample is also appended to `data/results.jsonl`, and the deduped
+`data/results.json` snapshot is rewritten after each one — same row shape and
+default path `harvest.py` uses, so `compare.py` (and the DB import) read
+either harness's output interchangeably. Pass `-T out_path=...` to keep a
+debugging run out of the shared file.
+
+**Bundled runs** — one model, 50 claims at a time, inspecting
+`data/results.json` between bundles. Inspect's `--limit` is a 1-indexed,
+inclusive range:
+
+```bash
+inspect eval task.py -T model_key=claude-fable-5 --limit 1-50
+inspect eval task.py -T model_key=claude-fable-5 --limit 51-100
+inspect eval task.py -T model_key=claude-fable-5 --limit 101-150
+```
+
+**Backup path** — `harvest.py` is a plain script with no framework
+dependency, kept as a fallback if Inspect itself is ever the blocker. Same
+output format, same default path, safe to interleave with `task.py` runs:
+
+```bash
+python harvest.py --claims data/claims.json --models claude-fable-5 --offset 0 --limit 50
+```
+
+(`harvest.py`'s `--offset`/`--limit` are 0-indexed — different convention
+from Inspect's 1-indexed `--limit` range above.)
 
 Results should match `data/results.jsonl` up to model non-determinism.
 

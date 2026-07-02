@@ -1,5 +1,11 @@
 """Frontier LLM fact-checking benchmark.
 
+BACKUP path — task.py (Inspect AI) is the primary harness for now. This
+script has no framework dependency (plain stdlib + vendor SDKs), so it
+stays here as a fallback if Inspect itself is ever the blocker. Both write
+the same data/results.jsonl / data/results.json shape and are safe to
+interleave.
+
 Reads a JSON/JSONL file of claims, evaluates each claim × model in parallel,
 and writes results to data/results.jsonl (append-only streaming log) and
 data/results.json (deduped final snapshot, one row per (claim, model)).
@@ -20,6 +26,12 @@ already running will still complete and bill.
 Usage:
     python harvest.py --claims data/claims.json
     python harvest.py --claims data/claims.json --models gpt-5.5-search,claude-fable-5
+
+Bundled runs (inspect data/results.json between bundles) — one model, 50
+claims at a time, all writing into the same --out file:
+    python harvest.py --claims data/claims.json --models claude-fable-5 --offset 0   --limit 50
+    python harvest.py --claims data/claims.json --models claude-fable-5 --offset 50  --limit 50
+    python harvest.py --claims data/claims.json --models claude-fable-5 --offset 100 --limit 50
 """
 
 from __future__ import annotations
@@ -263,6 +275,14 @@ def main():
     parser.add_argument('--claims', required=True, help='Path to claims JSON or JSONL file')
     parser.add_argument('--out', default='data/results.jsonl', help='Streaming JSONL output (default: data/results.jsonl)')
     parser.add_argument('--models', default='', help='Comma-separated model subset (default: all)')
+    parser.add_argument('--offset', type=int, default=0, help='Skip the first N claims (default: 0)')
+    parser.add_argument(
+        '--limit', type=int, default=None,
+        help='Take at most N claims after --offset (default: all remaining). '
+             'Combine with --offset to run in bundles, e.g. --offset 0 --limit 50, '
+             'then --offset 50 --limit 50 — both write into the same --out file, '
+             'so results.json accumulates across bundles.',
+    )
     args = parser.parse_args()
 
     claims_path = Path(args.claims)
@@ -275,6 +295,25 @@ def main():
         claims = json.loads(raw_text)
     else:
         claims = [json.loads(line) for line in raw_text.splitlines() if line.strip()]
+
+    if args.offset < 0:
+        print(f'Error: --offset must be >= 0 (got {args.offset})', file=sys.stderr)
+        sys.exit(1)
+    if args.limit is not None and args.limit < 1:
+        print(f'Error: --limit must be >= 1 (got {args.limit})', file=sys.stderr)
+        sys.exit(1)
+    if args.offset >= len(claims) and len(claims) > 0:
+        print(f'Error: --offset {args.offset} is beyond the claims file ({len(claims)} claims total)', file=sys.stderr)
+        sys.exit(1)
+
+    n_claims_total = len(claims)
+    end = args.offset + args.limit if args.limit is not None else None
+    claims = claims[args.offset:end]
+    if args.offset or args.limit is not None:
+        print(
+            f'Bundle: claims[{args.offset}:{end if end is not None else n_claims_total}] '
+            f'— {len(claims)} of {n_claims_total} total claims\n'
+        )
 
     models = [m.strip() for m in args.models.split(',') if m.strip()] if args.models else list(PROVIDER_CONFIG)
     unknown = [m for m in models if m not in PROVIDER_CONFIG]

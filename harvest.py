@@ -14,8 +14,14 @@ Input format — each record must have at minimum:
     claim    : str   — the claim text
     date     : str   — the epistemic anchor date (YYYY-MM-DD)
     category : str   — topic / domain (optional)
+    share_id : str   — opaque join key back to the source system (optional;
+                        passed through to the result row verbatim, defaults
+                        to '' if absent). Not a gold label — no verdict/
+                        conclusion field is read or persisted anywhere in
+                        this repo, so this key alone doesn't identify what
+                        the source system's own verdict was.
 
-Any extra fields (e.g. verdict, share_id) are ignored.
+Any other extra fields (e.g. a gold verdict) are ignored, not persisted.
 
 Resumable: re-running the same --out path skips (claim, model) cells that
 already succeeded and retries ones that previously errored (most failures
@@ -237,6 +243,7 @@ def run_cell(claim: dict, model: str) -> dict:
             'claim': claim['claim'],
             'date': claim.get('date', ''),
             'category': claim.get('category', ''),
+            'share_id': claim.get('share_id', ''),
             'model': model,
             'verdict': '',
             'reasoning': '',
@@ -254,6 +261,7 @@ def run_cell(claim: dict, model: str) -> dict:
         'claim': claim['claim'],
         'date': claim.get('date', ''),
         'category': claim.get('category', ''),
+        'share_id': claim.get('share_id', ''),
         'model': model,
         'verdict': verdict,
         'reasoning': reasoning,

@@ -9,6 +9,10 @@ Input format — each record must have at minimum:
     claim    : str  — the claim text
     date     : str  — the epistemic anchor date (YYYY-MM-DD)
     category : str  — topic / domain (optional)
+    share_id : str  — opaque join key back to the source system (optional;
+                       passed through to the result row verbatim). Not a
+                       gold label — no verdict/conclusion field is read or
+                       persisted anywhere in this repo.
 
 Usage — one model at a time:
     inspect eval task.py -T model_key=claude-fable-5
@@ -39,6 +43,7 @@ with `-T out_path=...` to keep a debugging run out of the shared file.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import threading
@@ -115,16 +120,27 @@ def _record_to_sample(record: dict) -> Sample:
     # No `target=` — data/claims.json has no gold verdict by design (see the
     # scorer below), so Sample's default empty target is the honest value,
     # not a lookup into a field that will never be there.
+    #
+    # id: prefer share_id (guaranteed unique, short). Truncating claim text
+    # to 64 chars is NOT collision-safe — near-duplicate claim variants that
+    # share a long common prefix (e.g. templated A/B claim submissions)
+    # truncate to the same id, and Inspect rejects the dataset outright with
+    # "duplicate sample ids". Fall back to the FULL (untruncated) claim text
+    # for older claims.json files that predate share_id — full text is
+    # unique across this dataset (claims were selected with pairwise
+    # distance >= 0.10), truncated text is not.
+    sample_id = record.get('share_id') or record['claim']
     return Sample(
         input=PROMPT_TEMPLATE.format(
             date=record.get('date', 'unknown'),
             claim=record['claim'],
         ),
-        id=str(record.get('claim', ''))[:64],
+        id=sample_id,
         metadata={
             'claim': record['claim'],
             'date': record.get('date', ''),
             'category': record.get('category', ''),
+            'share_id': record.get('share_id', ''),
         },
     )
 
@@ -233,7 +249,16 @@ def factcheck_solver(model_key: str = 'gpt-5.5-search'):
         error = ''
         raw = ''
         try:
-            raw = provider.complete(
+            # provider.complete() is a plain blocking call (the Anthropic/
+            # OpenAI/Gemini SDKs are synchronous here) — awaiting it directly
+            # with no thread offload would occupy Inspect's single event-loop
+            # thread for the whole request, so "concurrent" samples couldn't
+            # actually make progress while one was in flight (confirmed
+            # empirically: 4 fake 2s-blocking samples took ~11s, not ~2s).
+            # to_thread() runs it on a worker thread instead, freeing the
+            # event loop to run other samples' solve() coroutines for real.
+            raw = await asyncio.to_thread(
+                provider.complete,
                 system=SYSTEM_PROMPT,
                 user=state.user_prompt.text,
                 json_schema=VERDICT_JSON_SCHEMA if provider.supports_json_schema else None,
@@ -261,14 +286,14 @@ def factcheck_solver(model_key: str = 'gpt-5.5-search'):
 # Scorer
 # ---------------------------------------------------------------------------
 #
-# No accuracy metric: data/claims.json is deliberately built without a gold
-# verdict field (this repo stands alone, with no Lenz-internal identifiers —
-# see README). Scoring against target.text (always '') would let Inspect's
-# accuracy() metric silently report 0% for every model on every run — a
-# number that looks like a real result but measures nothing. This scorer
-# instead just records the verdict/reasoning/cost as metadata, viewable via
-# `inspect view`; use compare.py (or your own gold-label join) to actually
-# grade harvested verdicts.
+# No accuracy metric: data/claims.json carries share_id (an opaque join key
+# back to the source system) but deliberately no gold verdict field.
+# Scoring against target.text (always '') would let Inspect's accuracy()
+# metric silently report 0% for every model on every run — a number that
+# looks like a real result but measures nothing. This scorer instead just
+# records the verdict/reasoning/cost as metadata, viewable via `inspect
+# view`; use compare.py (or a gold-label join keyed on share_id) to
+# actually grade harvested verdicts.
 
 @scorer(metrics=[])
 def factcheck_scorer(out_path: str = 'data/results.jsonl'):
@@ -294,6 +319,7 @@ def factcheck_scorer(out_path: str = 'data/results.jsonl'):
             'claim': state.metadata.get('claim', ''),
             'date': state.metadata.get('date', ''),
             'category': state.metadata.get('category', ''),
+            'share_id': state.metadata.get('share_id', ''),
             'model': state.metadata.get('model_key', ''),
             'verdict': verdict,
             'reasoning': reasoning,
@@ -304,7 +330,13 @@ def factcheck_scorer(out_path: str = 'data/results.jsonl'):
             'raw_response': raw_response,
             'sources': state.metadata.get('sources', []),
         }
-        _append_and_resnapshot(row, out)
+        # Same reasoning as the solver's to_thread wrap: this does blocking
+        # file I/O (read the whole jsonl, rewrite the json snapshot) — now
+        # that solver calls genuinely run concurrently, scorer calls will
+        # too, so this needs to be off the event loop as well. _write_lock
+        # (inside _append_and_resnapshot) still serializes the actual file
+        # access across those concurrent threads.
+        await asyncio.to_thread(_append_and_resnapshot, row, out)
 
         return Score(
             value=verdict or '(parse error)',

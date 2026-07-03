@@ -8,3 +8,5 @@ __pycache__/
 logs/
 .venv/
 venv/
+data/results-max.json
+data/results-max.jsonl

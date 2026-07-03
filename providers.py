@@ -1,13 +1,13 @@
 """Frontier-LLM provider configuration for the fact-checking benchmark.
 
-Five models evaluated at full capacity — maximum thinking + live retrieval +
-native JSON schema enforcement:
+Five models evaluated at a medium reasoning tier — mid-level thinking + live
+retrieval + native JSON schema enforcement:
 
-  claude-fable-5      Anthropic   adaptive thinking (effort=max) + web search
-  gpt-5.5-search      OpenAI      reasoning_effort=xhigh + web search (high context)
-  gemini-3-retrieval  Google      thinking_budget=32768 + Google Search grounding
+  claude-fable-5      Anthropic   adaptive thinking (effort=medium) + web search
+  gpt-5.5-search      OpenAI      reasoning_effort=medium + web search (medium context)
+  gemini-3-retrieval  Google      thinking_budget=16384 + Google Search grounding
   sonar-deep-research Perplexity  always-on multi-step deep research
-  grok-4.3-search     xAI         reasoning_effort=xhigh + web search
+  grok-4.3-search     xAI         reasoning_effort=medium + web search
 
 API keys are read from environment variables (see .env.example).
 
@@ -34,15 +34,15 @@ PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
         'provider': 'anthropic',
         'api_key_env': 'ANTHROPIC_API_KEY',
         'api_model': 'claude-fable-5',
-        # 64000: thinking is always on and counts toward max_tokens; at
-        # effort=max Anthropic recommends >=64K headroom so a hard claim with
-        # several web-search rounds can't truncate the verdict.
+        # 64000: thinking is always on and counts toward max_tokens; keep
+        # >=64K headroom so a hard claim with several web-search rounds can't
+        # truncate the verdict even when thinking runs long.
         'min_max_tokens': 64000,
         'extra': {
             'thinking_budget': 16000,
             'web_search': True,
             'schema_with_thinking': True,
-            'effort': 'max',
+            'effort': 'medium',
             'request_timeout_ms': 300000,
             'excluded_domains': list(EXCLUDED_SOURCE_DOMAINS),
         },
@@ -53,8 +53,8 @@ PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
         'api_model': 'gpt-5.5',
         'min_max_tokens': 32000,
         'extra': {
-            'web_search': {'search_context_size': 'high'},
-            'reasoning_effort': 'xhigh',
+            'web_search': {'search_context_size': 'medium'},
+            'reasoning_effort': 'medium',
             'request_timeout_ms': 300000,
             'excluded_domains': list(EXCLUDED_SOURCE_DOMAINS),
         },
@@ -67,7 +67,7 @@ PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
         'extra': {
             'google_search_grounding': True,
             'schema_with_grounding': True,
-            'thinking_budget': 32768,
+            'thinking_budget': 16384,
             'request_timeout_ms': 300000,
             'excluded_domains': list(EXCLUDED_SOURCE_DOMAINS),
         },
@@ -91,7 +91,7 @@ PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
         'min_max_tokens': 32000,
         'extra': {
             'web_search': {},
-            'reasoning_effort': 'xhigh',
+            'reasoning_effort': 'medium',
             'request_timeout_ms': 300000,
             'excluded_domains': list(EXCLUDED_SOURCE_DOMAINS),
         },

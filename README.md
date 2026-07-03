@@ -1,20 +1,21 @@
 # Frontier LLM Fact-Check Benchmark
 
-Reproducibility package for **[paper title]**.
+Reproducibility package for **Beyond Benchmarks: Disagreement Among Frontier
+LLMs on Real-World Fact-Checks**.
 
 We evaluate five frontier LLMs on 1,000 real-world fact-checking claims sourced
 from [Lenz](https://lenz.io) — a live fact-checking platform. Each model uses
-maximum thinking depth, live web retrieval, and native JSON schema enforcement.
+medium thinking depth, live web retrieval, and native JSON schema enforcement.
 
 ## Models
 
 | Model | Provider | Thinking | Retrieval |
 |---|---|---|---|
-| claude-fable-5 | Anthropic | adaptive (effort=max) | web_search_20260209 |
-| gpt-5.5-search | OpenAI | reasoning_effort=xhigh | web search (high context) |
-| gemini-3-retrieval | Google | thinking_budget=32768 | Google Search grounding |
+| claude-fable-5 | Anthropic | adaptive (effort=medium) | web_search_20260209 |
+| gpt-5.5-search | OpenAI | reasoning_effort=medium | web search (medium context) |
+| gemini-3-retrieval | Google | thinking_budget=16384 | Google Search grounding |
 | sonar-deep-research | Perplexity | built-in multi-step | always-on deep research |
-| grok-4.3-search | xAI | reasoning_effort=xhigh | web search |
+| grok-4.3-search | xAI | reasoning_effort=medium | web search |
 
 ## Dataset
 
@@ -84,7 +85,16 @@ Results should match `data/results.jsonl` up to model non-determinism.
 
 ## Prompt
 
-Each model receives:
+Each model receives a **system prompt** and a **user prompt**. `{date}` and
+`{claim}` are filled in per claim.
+
+**System prompt:**
+
+```
+You are a fact-checker. Evaluate the truthfulness of the claim as of the stated date. Respond with JSON only.
+```
+
+**User prompt:**
 
 ```
 Evaluate this claim as of {date}:

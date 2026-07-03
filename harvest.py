@@ -91,17 +91,17 @@ PROMPT_TEMPLATE = (
     '"{claim}"\n'
     '\n'
     'Choose exactly one verdict from the scale below:\n'
-    '  "True"         — the claim is accurate\n'
-    '  "Mostly True"  — the claim is largely accurate with minor caveats or omissions\n'
-    '  "Mixed"        — the claim has both accurate and inaccurate elements\n'
+    '  "True" — the claim is accurate\n'
+    '  "Mostly True" — the claim is largely accurate with minor caveats or omissions\n'
+    '  "Mixed" — the claim has both accurate and inaccurate elements\n'
     '  "Mostly False" — the claim is largely inaccurate with some basis in fact\n'
-    '  "False"        — the claim is inaccurate\n'
+    '  "False" — the claim is inaccurate\n'
     '\n'
     'Respond with a JSON object containing exactly these fields:\n'
     '  "reasoning": 2-4 sentences of claim analysis and verdict justification\n'
-    '  "verdict":   one of the five labels above\n'
+    '  "verdict": one of the five labels above\n'
     '  "confidence_level": your level of certainty in the verdict on a 1 to 10 integer scale '
-    '(1 = completely uncertain, 10 = fully certain).'
+    '(1 = completely uncertain, 10 = fully certain)'
 )
 
 VERDICT_JSON_SCHEMA: dict = {

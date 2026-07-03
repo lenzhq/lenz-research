@@ -91,15 +91,14 @@ Evaluate this claim as of {date}:
 "{claim}"
 
 Choose exactly one verdict from the scale below:
-  "True"         — the claim is accurate
-  "Mostly True"  — the claim is largely accurate with minor caveats or omissions
-  "Mixed"        — the claim has both accurate and inaccurate elements
+  "True" — the claim is accurate
+  "Mostly True" — the claim is largely accurate with minor caveats or omissions
+  "Mixed" — the claim has both accurate and inaccurate elements
   "Mostly False" — the claim is largely inaccurate with some basis in fact
-  "False"        — the claim is inaccurate
+  "False" — the claim is inaccurate
 
 Respond with a JSON object containing exactly these fields:
   "reasoning": 2-4 sentences of claim analysis and verdict justification
-  "verdict":   one of the five labels above
-  "confidence_level": your level of certainty in the verdict on a 1 to 10 integer scale
-  (1 = completely uncertain, 10 = fully certain).
+  "verdict": one of the five labels above
+  "confidence_level": your level of certainty in the verdict on a 1 to 10 integer scale (1 = completely uncertain, 10 = fully certain)
 ```

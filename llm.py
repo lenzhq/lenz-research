@@ -439,10 +439,13 @@ class GeminiProvider(LLMProvider):
         from google.genai import types
         tools = []
         if self.search_grounding:
-            google_search_kwargs: dict[str, Any] = {}
-            if self.excluded_domains:
-                google_search_kwargs['exclude_domains'] = self.excluded_domains
-            tools = [types.Tool(google_search=types.GoogleSearch(**google_search_kwargs))]
+            # No exclude_domains: the google-genai SDK hard-rejects it
+            # client-side (ValueError, before the request is sent) unless
+            # the client is in Vertex AI "Enterprise Agent Platform" mode —
+            # this repo authenticates with a plain Developer API key, so the
+            # contamination guard the other 4 providers get natively isn't
+            # available here. See README for the tradeoff.
+            tools = [types.Tool(google_search=types.GoogleSearch())]
         config_kwargs: dict[str, Any] = {
             'system_instruction': system,
             'temperature': self.temperature,

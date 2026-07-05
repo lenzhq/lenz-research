@@ -100,7 +100,7 @@ def main():
                 'claim': claim_text,
                 'date': r.get('date', ''),
                 'category': r.get('category', ''),
-                'share_id': r.get('share_id', ''),
+                'verification_id': r.get('verification_id', ''),
                 'models': {},
             }
         by_claim[claim_text]['models'][r['model']] = {

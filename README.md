@@ -19,23 +19,23 @@ medium thinking depth, live web retrieval, and native JSON schema enforcement.
 
 ## Dataset
 
-`data/claims.json` — 1,000 claims sampled from Lenz. Carries `share_id`, an
+`data/claims.json` — 1,000 claims sampled from Lenz. Carries `verification_id`, an
 opaque join key back to Lenz, but deliberately no gold verdict — this repo
 never reads or persists a conclusion label anywhere, so it stays safe to
 share even though this field ties a row back to a specific Lenz claim.
 Claims were also selected with pairwise embedding distance >= 0.10, so claim
-text remains a safe join key on its own if you ever strip `share_id` back
+text remains a safe join key on its own if you ever strip `verification_id` back
 out. A JSON array of records:
 
 ```json
-{"claim": "...", "date": "2026-03-14", "category": "Science", "share_id": "4890227d"}
+{"claim": "...", "date": "2026-03-14", "category": "Science", "verification_id": "4890227d"}
 ```
 
 `data/results.jsonl` — per-(claim × model) harvest outputs, one JSON object per line
 (streamed as the run progresses; `data/results.json` is the same rows as a final array):
 
 ```json
-{"claim": "...", "date": "2026-03-14", "category": "Science", "share_id": "4890227d", "model": "gpt-5.5-search", "verdict": "True", "reasoning": "...", "confidence": 9, "cost_eur": 0.0042, "latency_s": 18.3, "error": "", "raw_response": "...", "sources": ["https://..."]}
+{"claim": "...", "date": "2026-03-14", "category": "Science", "verification_id": "4890227d", "model": "gpt-5.5-search", "verdict": "True", "reasoning": "...", "confidence": 9, "cost_eur": 0.0042, "latency_s": 18.3, "error": "", "raw_response": "...", "sources": ["https://..."]}
 ```
 
 An erroring cell carries the same shape with `verdict`/`confidence`/`raw_response`

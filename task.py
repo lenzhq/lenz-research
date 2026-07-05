@@ -9,7 +9,7 @@ Input format — each record must have at minimum:
     claim    : str  — the claim text
     date     : str  — the epistemic anchor date (YYYY-MM-DD)
     category : str  — topic / domain (optional)
-    share_id : str  — opaque join key back to the source system (optional;
+    verification_id : str  — opaque join key back to the source system (optional;
                        passed through to the result row verbatim). Not a
                        gold label — no verdict/conclusion field is read or
                        persisted anywhere in this repo.
@@ -121,15 +121,15 @@ def _record_to_sample(record: dict) -> Sample:
     # scorer below), so Sample's default empty target is the honest value,
     # not a lookup into a field that will never be there.
     #
-    # id: prefer share_id (guaranteed unique, short). Truncating claim text
+    # id: prefer verification_id (guaranteed unique, short). Truncating claim text
     # to 64 chars is NOT collision-safe — near-duplicate claim variants that
     # share a long common prefix (e.g. templated A/B claim submissions)
     # truncate to the same id, and Inspect rejects the dataset outright with
     # "duplicate sample ids". Fall back to the FULL (untruncated) claim text
-    # for older claims.json files that predate share_id — full text is
+    # for older claims.json files that predate verification_id — full text is
     # unique across this dataset (claims were selected with pairwise
     # distance >= 0.10), truncated text is not.
-    sample_id = record.get('share_id') or record['claim']
+    sample_id = record.get('verification_id') or record['claim']
     return Sample(
         input=PROMPT_TEMPLATE.format(
             date=record.get('date', 'unknown'),
@@ -140,7 +140,7 @@ def _record_to_sample(record: dict) -> Sample:
             'claim': record['claim'],
             'date': record.get('date', ''),
             'category': record.get('category', ''),
-            'share_id': record.get('share_id', ''),
+            'verification_id': record.get('verification_id', ''),
         },
     )
 
@@ -286,13 +286,13 @@ def factcheck_solver(model_key: str = 'gpt-5.5-search'):
 # Scorer
 # ---------------------------------------------------------------------------
 #
-# No accuracy metric: data/claims.json carries share_id (an opaque join key
+# No accuracy metric: data/claims.json carries verification_id (an opaque join key
 # back to the source system) but deliberately no gold verdict field.
 # Scoring against target.text (always '') would let Inspect's accuracy()
 # metric silently report 0% for every model on every run — a number that
 # looks like a real result but measures nothing. This scorer instead just
 # records the verdict/reasoning/cost as metadata, viewable via `inspect
-# view`; use compare.py (or a gold-label join keyed on share_id) to
+# view`; use compare.py (or a gold-label join keyed on verification_id) to
 # actually grade harvested verdicts.
 
 @scorer(metrics=[])
@@ -319,7 +319,7 @@ def factcheck_scorer(out_path: str = 'data/results.jsonl'):
             'claim': state.metadata.get('claim', ''),
             'date': state.metadata.get('date', ''),
             'category': state.metadata.get('category', ''),
-            'share_id': state.metadata.get('share_id', ''),
+            'verification_id': state.metadata.get('verification_id', ''),
             'model': state.metadata.get('model_key', ''),
             'verdict': verdict,
             'reasoning': reasoning,

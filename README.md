@@ -54,11 +54,11 @@ inspect eval task.py -T model_key=claude-fable-5
 inspect view
 ```
 
-Every scored sample is also appended to `data/results.jsonl`, and the deduped
-`data/results.json` snapshot is rewritten after each one — same row shape and
-default path `harvest.py` uses, so `compare.py` (and the DB import) read
-either harness's output interchangeably. Pass `-T out_path=...` to keep a
-debugging run out of the shared file.
+Every scored sample is upserted into `data/results.jsonl` (one row per
+(claim, model) cell), and the deduped `data/results.json` snapshot is
+rewritten after each one, so `compare.py` (and the DB import) always read a
+current, duplicate-free file. Pass `-T out_path=...` to keep a debugging run
+out of the shared file.
 
 **Bundled runs** — one model, 50 claims at a time, inspecting
 `data/results.json` between bundles. Inspect's `--limit` is a 1-indexed,
@@ -70,18 +70,25 @@ inspect eval task.py -T model_key=claude-fable-5 --limit 51-100
 inspect eval task.py -T model_key=claude-fable-5 --limit 101-150
 ```
 
-**Backup path** — `harvest.py` is a plain script with no framework
-dependency, kept as a fallback if Inspect itself is ever the blocker. Same
-output format, same default path, safe to interleave with `task.py` runs:
+**Resume** — re-running any range is safe and cheap: samples that already
+have a successful row for that model in `out_path` are skipped without an
+API call, while errored rows (refusals, timeouts, rate limits, quota
+failures) are retried and their line replaced in place. So after a partial
+failure, just re-run the full range:
 
 ```bash
-python harvest.py --claims data/claims.json --models claude-fable-5 --offset 0 --limit 50
+inspect eval task.py -T model_key=claude-fable-5 --limit 1-1000
 ```
 
-(`harvest.py`'s `--offset`/`--limit` are 0-indexed — different convention
-from Inspect's 1-indexed `--limit` range above.)
-
 Results should match `data/results.jsonl` up to model non-determinism.
+
+**Known caveat (Gemini)** — the google-genai SDK only supports
+`exclude_domains` on its search-grounding tool in Vertex AI "Enterprise
+Agent Platform" mode; with a plain Developer API key it raises a client-side
+`ValueError` on every request. `gemini-3-retrieval` therefore runs *without*
+the lenz.io domain-exclusion contamination guard the other four providers
+enforce natively. A post-run audit of all grounded sources found zero
+lenz.io citations.
 
 ## Prompt
 

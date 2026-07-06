@@ -1,9 +1,8 @@
 """Frontier LLM fact-checking evaluation — Inspect AI task.
 
-Primary harness for running the benchmark. Framework-standard evaluation
+The harness for running the benchmark. Framework-standard evaluation
 that integrates with Inspect View for visualisation and produces
-reproducible logs. (harvest.py is kept as a backup path — plain-script,
-no framework dependency — in case Inspect itself is ever the blocker.)
+reproducible logs.
 
 Input format — each record must have at minimum:
     claim    : str  — the claim text
@@ -26,19 +25,22 @@ View results:
 
 Bundled runs (inspect data/results.json between bundles) — one model, 50
 claims at a time. Inspect's --limit takes a 1-indexed, inclusive range
-(--limit 1-50 means samples 1 through 50, NOT 0-indexed like harvest.py's
---offset/--limit) — all bundles write into the same data/results.jsonl:
+(--limit 1-50 means samples 1 through 50) — all bundles write into the
+same data/results.jsonl:
     inspect eval task.py -T model_key=claude-fable-5 --limit 1-50
     inspect eval task.py -T model_key=claude-fable-5 --limit 51-100
     inspect eval task.py -T model_key=claude-fable-5 --limit 101-150
 
+Re-running a range is safe: samples that already have a successful row for
+this model in out_path are skipped without an API call, and errored rows
+are retried with their line replaced in place (see _load_done_ids /
+_append_and_resnapshot below).
+
 In addition to Inspect's own .eval log, every scored sample is also
-appended to data/results.jsonl and the deduped data/results.json snapshot
-is rewritten — byte-identical row shape to harvest.py's output, same
-default path, so compare.py and the Lenz DB import script read either
-harness's output interchangeably, and a later `harvest.py` resume run will
-correctly skip (claim, model) pairs already scored here. Override the path
-with `-T out_path=...` to keep a debugging run out of the shared file.
+upserted into data/results.jsonl and the deduped data/results.json snapshot
+is rewritten, so compare.py and the Lenz DB import script always read a
+current, duplicate-free file. Override the path with `-T out_path=...` to
+keep a debugging run out of the shared file.
 """
 
 from __future__ import annotations
@@ -188,6 +190,38 @@ def _parse_verdict(raw: str) -> tuple[str, int, str]:
         return '', 0, ''
 
 # ---------------------------------------------------------------------------
+# Resume — skip samples with a successful prior attempt for this model_key,
+# same semantics as harvest.py's _load_prior_results/done set. Unlike
+# harvest.py, task.py previously had no resume awareness at all: re-running
+# the same --limit range re-evaluated (and re-billed) every sample in it,
+# including ones that already succeeded. Errored rows are deliberately NOT
+# treated as done, so a resumed run retries them — most failures (Fable 5
+# safety-classifier refusals, timeouts, rate limits) are worth another try.
+# ---------------------------------------------------------------------------
+
+def _load_done_ids(out_path: Path, model_key: str) -> set[str]:
+    if not out_path.exists():
+        return set()
+    done: set[str] = set()
+    with out_path.open(encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # tolerate a truncated last line from a prior crash
+            if row.get('model') != model_key or row.get('error'):
+                continue
+            # Matches _record_to_sample's id: verification_id if present, else
+            # the full claim text (fallback for pre-verification_id
+            # claims.json rows).
+            done.add(row.get('verification_id') or row.get('claim', ''))
+    return done
+
+
+# ---------------------------------------------------------------------------
 # results.jsonl / results.json — same shape and dedup semantics as
 # harvest.py, so the two harnesses' output is interchangeable.
 # ---------------------------------------------------------------------------
@@ -195,16 +229,31 @@ def _parse_verdict(raw: str) -> tuple[str, int, str]:
 _write_lock = threading.Lock()
 
 
+def _cell_key(row: dict) -> tuple[str, str]:
+    return (row.get('verification_id') or row.get('claim', ''), row.get('model', ''))
+
+
 def _append_and_resnapshot(row: dict, out_path: Path) -> None:
-    """Append `row` to out_path (jsonl) and rewrite the deduped .json
-    snapshot alongside it.
+    """Upsert `row` into out_path (jsonl, one row per (claim, model)) and
+    rewrite the deduped .json snapshot alongside it.
+
+    NOTE: despite the name (kept for continuity with harvest.py, which is
+    still genuinely append-only), this rewrites the whole file rather than
+    appending — a re-scored cell replaces its existing line in place instead
+    of adding a second line for the same (claim, model). harvest.py keeps
+    true append-only semantics (crash-safe, no read-modify-write), with
+    dedup only in its separate results.json snapshot; this version trades
+    that crash-safety margin for never having two rows in results.jsonl
+    itself, on the reasoning that this dataset is small enough (low hundreds
+    of KB) that a full rewrite per cell is cheap, and the write is done to a
+    temp file + atomic os.replace so a crash mid-write can't corrupt the
+    existing file.
 
     Recomputes the snapshot from the full jsonl on every call — not
     incrementally in memory — so it's always correct even if the eval is
-    interrupted mid-run; no dependency on an "eval finished" hook. Cheap at
-    this dataset size (low hundreds of KB), same tradeoff harvest.py makes.
+    interrupted mid-run; no dependency on an "eval finished" hook.
 
-    Lock covers the whole append+resnapshot: Inspect may run solver/scorer
+    Lock covers the whole read-modify-write: Inspect may run solver/scorer
     calls across real OS threads (blocking synchronous SDK calls can't run
     on a single asyncio event loop without serializing everything), so
     concurrent scorer invocations can race on this file exactly like
@@ -212,23 +261,32 @@ def _append_and_resnapshot(row: dict, out_path: Path) -> None:
     """
     with _write_lock:
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open('a', encoding='utf-8') as f:
-            f.write(json.dumps(row, ensure_ascii=False) + '\n')
 
         rows: list[dict] = []
-        with out_path.open(encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rows.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue  # tolerate a truncated last line from a prior crash
+        if out_path.exists():
+            with out_path.open(encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rows.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue  # tolerate a truncated last line from a prior crash
 
-        # Last write wins per (claim, model) — matches harvest.py's
-        # results_by_cell dedup, so a re-scored cell doesn't duplicate.
-        deduped = list({(r.get('claim', ''), r.get('model', '')): r for r in rows}.values())
+        # dict preserves insertion order and updating an existing key keeps
+        # its original position — so a re-scored cell rewrites its line in
+        # place instead of moving to the end of the file.
+        by_key: dict[tuple[str, str], dict] = {_cell_key(r): r for r in rows}
+        by_key[_cell_key(row)] = row
+        deduped = list(by_key.values())
+
+        tmp_path = out_path.with_suffix(out_path.suffix + '.tmp')
+        with tmp_path.open('w', encoding='utf-8') as f:
+            for r in deduped:
+                f.write(json.dumps(r, ensure_ascii=False) + '\n')
+        tmp_path.replace(out_path)
+
         out_path.with_suffix('.json').write_text(
             json.dumps(deduped, ensure_ascii=False, indent=2), encoding='utf-8'
         )
@@ -240,8 +298,22 @@ def _append_and_resnapshot(row: dict, out_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 @solver
-def factcheck_solver(model_key: str = 'gpt-5.5-search'):
+def factcheck_solver(model_key: str = 'gpt-5.5-search', done_ids: frozenset[str] = frozenset()):
     async def solve(state: TaskState, generate: Generate) -> TaskState:
+        # Resume: this sample already has a successful row for model_key in
+        # out_path. Skip the API call entirely rather than re-billing it —
+        # checked here (per-sample, post-slice) rather than by filtering the
+        # dataset in factcheck() below, because Inspect's --limit N-M slices
+        # the dataset by POSITION after the task function returns; filtering
+        # first would shift every later sample's position and silently point
+        # --limit at the wrong claims.
+        if str(state.sample_id) in done_ids:
+            state.metadata.update({'skipped_resume': True, 'model_key': model_key})
+            state.messages.append(ChatMessageAssistant(content='(skipped — already scored)'))
+            state.output = ModelOutput.from_content(model=PROVIDER_CONFIG[model_key]['api_model'], content='(skipped — already scored)')
+            state.completed = True
+            return state
+
         cfg = PROVIDER_CONFIG[model_key]
         provider = build_provider(cfg)
 
@@ -300,6 +372,16 @@ def factcheck_scorer(out_path: str = 'data/results.jsonl'):
     out = Path(out_path)
 
     async def score(state: TaskState, target: Target) -> Score:
+        if state.metadata.get('skipped_resume'):
+            # Already has a successful row in out_path from a prior run —
+            # don't append a second (redundant) row for the same cell.
+            return Score(
+                value='(skipped)',
+                answer='(skipped)',
+                explanation='Skipped — already scored in a prior run of this out_path.',
+                metadata={'skipped_resume': True},
+            )
+
         provider_error = state.metadata.get('error', '')
 
         if provider_error:
@@ -373,8 +455,20 @@ def factcheck(
     claims_file: str = 'data/claims.json',
     out_path: str = 'data/results.jsonl',
 ):
+    dataset = json_dataset(claims_file, _record_to_sample)
+
+    # Deliberately NOT filtered out of `dataset` here — Inspect's --limit N-M
+    # slices dataset[N-1:M] by POSITION after this function returns (see
+    # inspect_ai._eval.task.util.sample_slice), so removing already-done
+    # samples first would shift every later sample's position and silently
+    # point --limit at the wrong claims. Skipping instead happens per-sample
+    # in factcheck_solver, which runs after the positional slice.
+    done_ids = frozenset(_load_done_ids(Path(out_path), model_key))
+    if done_ids:
+        print(f'Resume: {len(done_ids)} sample(s) already succeeded for {model_key} in {out_path} — will skip, not re-bill.\n')
+
     return Task(
-        dataset=json_dataset(claims_file, _record_to_sample),
-        solver=factcheck_solver(model_key=model_key),
+        dataset=dataset,
+        solver=factcheck_solver(model_key=model_key, done_ids=done_ids),
         scorer=factcheck_scorer(out_path=out_path),
     )

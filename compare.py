@@ -4,12 +4,11 @@ Reads data/results.json and groups results by claim text.
 Since claims are unique (pairwise distance >= 0.10), claim text is the key.
 
 Outputs:
-  data/comparison.json  — one entry per claim with all model verdicts side by side
-  stdout                — summary table + disagreement breakdown
+  stdout — summary table + disagreement breakdown
 
 Usage:
     python compare.py
-    python compare.py --results data/results.json --out data/comparison.json
+    python compare.py --results data/results.json
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ from pathlib import Path
 
 # Claim text and error strings are model-controlled/model-adjacent text
 # printed straight to the terminal — strip control/escape chars so they
-# can't spoof output or retitle the terminal (same guard as harvest.py).
+# can't spoof output or retitle the terminal (same guard as task.py).
 _CONTROL_CHARS = re.compile(r'[\x00-\x08\x0b-\x1f\x7f]')
 
 
@@ -56,21 +55,20 @@ def verdict_spread(verdicts: list[str]) -> int:
 def main():
     parser = argparse.ArgumentParser(description='Compare model verdicts per claim')
     parser.add_argument('--results', default='data/results.json')
-    parser.add_argument('--out', default='data/comparison.json')
     args = parser.parse_args()
 
     results_path = Path(args.results)
     if not results_path.exists():
-        print(f'Error: {results_path} not found. Run harvest.py first.')
+        print(f'Error: {results_path} not found. Run task.py first (see README).')
         return
 
-    # harvest.py rewrites results.json from results.jsonl at the end of every
-    # run, including on interrupt — but a hard kill (OOM, kill -9) bypasses
-    # even that, leaving results.json stale while the jsonl has newer rows.
+    # task.py rewrites results.json from results.jsonl after every scored
+    # sample — but a hard kill (OOM, kill -9) can still land between the two
+    # writes, leaving results.json stale while the jsonl has newer rows.
     jsonl_path = results_path.with_suffix('.jsonl')
     if jsonl_path.exists() and jsonl_path.stat().st_mtime > results_path.stat().st_mtime:
         print(
-            f'WARNING: {jsonl_path} is newer than {results_path} — harvest.py may not have '
+            f'WARNING: {jsonl_path} is newer than {results_path} — the eval may not have '
             f'finished writing the final snapshot. These statistics may be stale or incomplete.\n'
         )
 
@@ -162,11 +160,6 @@ def main():
     # Sort: most disagreement first
     comparison.sort(key=lambda e: (-e['spread'], e['category'], e['claim']))
 
-    # Write comparison.json
-    out_path = Path(args.out)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(comparison, ensure_ascii=False, indent=2), encoding='utf-8')
-
     # Print summary
     n_claims = len(comparison)
     n_rows = len(results)
@@ -202,8 +195,6 @@ def main():
                 flag = ' <--' if m in entry['disagreeing_models'] else ''
                 print(f'    {m:30s}  {v:12s}  conf={conf}{flag}')
             print()
-
-    print(f'Full comparison written to {out_path}')
 
 
 if __name__ == '__main__':

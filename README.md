@@ -35,11 +35,20 @@ out. A JSON array of records:
 (streamed as the run progresses; `data/results.json` is the same rows as a final array):
 
 ```json
-{"claim": "...", "date": "2026-03-14", "category": "Science", "verification_id": "4890227d", "model": "gpt-5.5-search", "verdict": "True", "reasoning": "...", "confidence": 9, "cost_eur": 0.0042, "latency_s": 18.3, "error": "", "raw_response": "...", "sources": ["https://..."]}
+{"claim": "...", "date": "2026-03-14", "category": "Science", "verification_id": "4890227d", "model": "gpt-5.5-search", "verdict": "True", "reasoning": "...", "confidence": 9, "cost_eur": 0.0042, "latency_s": 18.3, "error": "", "raw_response": "...", "sources": ["https://..."], "fallback_used": false, "fallback_model": ""}
 ```
 
 An erroring cell carries the same shape with `verdict`/`confidence`/`raw_response`
 empty and `error` set to the exception message.
+
+**claude-fable-5 fallback:** any failed claude-fable-5 call (safety-classifier
+refusal, timeout, rate limit, the ZDR-retention 400, etc.) retries once against
+claude-opus-4-8 rather than being recorded as an error. The row still reports
+`"model": "claude-fable-5"` (keeps the 5-model-per-claim panel shape intact),
+but `fallback_used` is `true` and `fallback_model` is `"claude-opus-4-8"` —
+filter on `fallback_used` before treating a row as a genuine Fable 5 answer.
+`cost_eur`/`latency_s` include both the failed primary attempt and the
+fallback attempt.
 
 ## Reproduce
 
@@ -59,6 +68,15 @@ Every scored sample is upserted into `data/results.jsonl` (one row per
 rewritten after each one, so `compare.py` (and the DB import) always read a
 current, duplicate-free file. Pass `-T out_path=...` to keep a debugging run
 out of the shared file.
+
+Inspect caps concurrent Model API calls at `--max-connections 10` by default —
+that's the effective throttle on how fast a run burns through claims. Raise it
+(e.g. `--max-connections 20`) if your provider's rate limits allow it, or pass
+it explicitly to pin the behavior instead of relying on the default:
+
+```bash
+inspect eval task.py -T model_key=claude-fable-5 --max-connections 10
+```
 
 **Bundled runs** — one model, 50 claims at a time, inspecting
 `data/results.json` between bundles. Inspect's `--limit` is a 1-indexed,

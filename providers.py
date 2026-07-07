@@ -46,6 +46,26 @@ PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
             'request_timeout_ms': 300000,
             'excluded_domains': list(EXCLUDED_SOURCE_DOMAINS),
         },
+        # Fallback: any failed claude-fable-5 call (refusal, timeout, rate
+        # limit, ZDR-retention 400, etc.) retries once against Opus 4.8
+        # instead of leaving an error row — see factcheck_solver in task.py.
+        # Opus 4.8 is in AnthropicProvider._OMIT_TEMPERATURE_MODELS too (same
+        # adaptive-thinking / no-temperature handling as Fable 5), so the
+        # 'extra' shape below is deliberately identical to the primary entry.
+        'fallback': {
+            'provider': 'anthropic',
+            'api_key_env': 'ANTHROPIC_API_KEY',
+            'api_model': 'claude-opus-4-8',
+            'min_max_tokens': 64000,
+            'extra': {
+                'thinking_budget': 16000,
+                'web_search': True,
+                'schema_with_thinking': True,
+                'effort': 'medium',
+                'request_timeout_ms': 300000,
+                'excluded_domains': list(EXCLUDED_SOURCE_DOMAINS),
+            },
+        },
     },
     'gpt-5.5-search': {
         'provider': 'openai-responses',

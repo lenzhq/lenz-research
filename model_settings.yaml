@@ -1,0 +1,143 @@
+# Model settings reference — frontier fact-check benchmark
+#
+# Human-readable mirror of providers.py + llm.py. NOT read by any code —
+# if you change a model's config, edit providers.py/llm.py first, then
+# update this file to match. Kept for at-a-glance review without digging
+# through the provider classes.
+
+defaults:
+  # llm.py — used only as a fallback where a model's `extra.request_timeout_ms`
+  # isn't set. All 5 models below set it explicitly, so these rarely fire.
+  temperature: 0.0          # DEFAULT_TEMPERATURE — passed to every provider,
+                            # but two models never actually receive it (see below)
+  max_tokens: 800           # DEFAULT_MAX_TOKENS — floor; each model's min_max_tokens wins if higher
+  timeouts:
+    anthropic_s: 300
+    openai_s: 300
+    perplexity_s: 600       # sonar-deep-research is slow
+    gemini_ms: 300000
+  excluded_source_domains: [lenz.io]   # contamination guard: claims are sourced from
+                                        # Lenz, so models must not retrieve Lenz's own verdict page
+
+models:
+  claude-fable-5:
+    provider: anthropic
+    api_model: claude-fable-5
+    api_key_env: ANTHROPIC_API_KEY
+    temperature: null       # OMITTED, not 0 — Anthropic 400s if you pass temperature/top_p/top_k
+                            # while thinking is enabled. Thinking is always on for Fable 5, so
+                            # temperature is never controllable. Effective sampling is Anthropic's
+                            # internal default (~1.0), not user-settable to 0.
+    thinking:
+      type: adaptive         # only accepted explicit form; 'disabled' also 400s (unlike Opus 4.7/4.8)
+      effort: medium
+      budget_tokens: 16000
+    web_search:
+      enabled: true
+      tool: web_search_20260209
+      blocked_domains: [lenz.io]
+    json_schema:
+      supported: true
+      via: schema_with_thinking      # required to get structured output while thinking is on
+    max_tokens:
+      min: 64000              # thinking tokens count toward max_tokens; kept high so a hard claim
+                               # with several search rounds can't get truncated
+    request_timeout_ms: 300000
+    pricing_eur_per_1m_tokens:
+      input: 8.50
+      output: 42.50            # thinking tokens billed as output
+    caveats:
+      - requires org-level 30-day data retention (Zero Data Retention orgs 400 on every request)
+      - safety classifiers can return stop_reason='refusal' -> surfaces as an empty-response RuntimeError
+    fallback:
+      on: any failed call (refusal, timeout, rate limit, ZDR-retention 400, etc.)
+      retries_once_against: claude-opus-4-8   # same extra/thinking shape as above
+      result_row: still model='claude-fable-5'; fallback_used=true, fallback_model='claude-opus-4-8'
+
+  gpt-5.5-search:
+    provider: openai-responses
+    api_model: gpt-5.5
+    api_key_env: OPENAI_API_KEY
+    temperature: null        # OMITTED, not 0 — gpt-5.5 is in _FIXED_TEMPERATURE_MODELS; OpenAI
+                              # rejects a caller-supplied temperature on reasoning-effort models.
+    reasoning_effort: medium
+    web_search:
+      enabled: true
+      search_context_size: medium
+      blocked_domains: [lenz.io]     # field name 'blocked_domains' (OpenAI's Responses API)
+    json_schema:
+      supported: true
+    max_tokens:
+      min: 32000
+    request_timeout_ms: 300000
+    pricing_eur_per_1m_tokens:
+      input: 4.25
+      output: 25.50
+
+  gemini-3-retrieval:
+    provider: gemini
+    api_model: gemini-3.1-pro-preview
+    api_key_env: GEMINI_API_KEY
+    temperature: 0.0          # EXPLICIT — Gemini has no omit-on-thinking constraint, so this is
+                              # the one of the three "temperature=0" models where 0 truly reaches the API.
+    thinking:
+      budget_tokens: 16384
+    web_search:
+      enabled: true
+      mechanism: google_search_grounding
+      blocked_domains: null    # NOT enforced — google-genai SDK hard-rejects domain exclusion
+                                # client-side unless on Vertex AI "Enterprise Agent Platform" mode;
+                                # this repo authenticates with a plain Developer API key, so Gemini
+                                # is the one model WITHOUT the contamination guard the other 4 get.
+    json_schema:
+      supported: true
+      via: schema_with_grounding    # required to get structured output while grounding is on
+    max_tokens:
+      min: 8192
+    request_timeout_ms: 300000
+    pricing_eur_per_1m_tokens:
+      input: 1.70
+      output: 10.20
+
+  sonar-deep-research:
+    provider: perplexity
+    api_model: sonar-deep-research
+    api_key_env: PERPLEXITY_API_KEY
+    temperature: 0.0          # EXPLICIT — reaches the API as-is
+    thinking:
+      mechanism: built-in always-on multi-step deep research   # not separately configurable
+    web_search:
+      enabled: true            # implicit in "deep research"; not a separate toggle
+      blocked_domains: [lenz.io]   # via search_domain_filter (extra_body, hyphen-prefixed denylist)
+    json_schema:
+      supported: true
+    max_tokens:
+      min: 16384                # responses carry a visible <think>...</think> prefix; 8192 risked truncation
+    request_timeout_ms: 600000  # slowest model by far
+    pricing_eur_per_1m_tokens:
+      input: 1.70
+      output: 6.80
+
+  grok-4.3-search:
+    provider: xai-responses      # subclasses OpenAIResponsesProvider
+    api_model: grok-4.3
+    api_key_env: XAI_API_KEY
+    temperature: 0.0            # EXPLICIT — 'grok-4.3' is not in _FIXED_TEMPERATURE_MODELS, so it
+                                 # goes through the same OpenAI-Responses code path but keeps temperature
+    reasoning_effort: medium
+    web_search:
+      enabled: true
+      blocked_domains: [lenz.io]   # field name 'excluded_domains' (xAI's Responses API, unlike OpenAI's 'blocked_domains')
+    json_schema:
+      supported: true
+    max_tokens:
+      min: 32000
+    request_timeout_ms: 300000
+    pricing_eur_per_1m_tokens:
+      input: 1.06
+      output: 2.13
+
+notes:
+  temperature_summary:
+    "0 (explicit)": [gemini-3-retrieval, sonar-deep-research, grok-4.3-search]
+    "omitted (provider-fixed, not 0)": [claude-fable-5, gpt-5.5-search]

@@ -41,6 +41,15 @@ upserted into data/results.jsonl and the deduped data/results.json snapshot
 is rewritten, so compare.py and the Lenz DB import script always read a
 current, duplicate-free file. Override the path with `-T out_path=...` to
 keep a debugging run out of the shared file.
+
+claude-fable-5 fallback: any failed call (refusal, timeout, rate limit, the
+ZDR-retention 400, etc.) retries once against claude-opus-4-8 before the
+sample is scored as an error (see PROVIDER_CONFIG['claude-fable-5']['fallback']
+in providers.py and factcheck_solver below). The result row still reports
+model='claude-fable-5' (keeps the panel's 5-model-per-claim shape intact for
+aggregations.py/compare.py), but carries `fallback_used: true` and
+`fallback_model: 'claude-opus-4-8'` so the substitution is fully traceable —
+filter on `fallback_used` before treating a row as a genuine Fable 5 answer.
 """
 
 from __future__ import annotations
@@ -195,8 +204,11 @@ def _parse_verdict(raw: str) -> tuple[str, int, str]:
 # harvest.py, task.py previously had no resume awareness at all: re-running
 # the same --limit range re-evaluated (and re-billed) every sample in it,
 # including ones that already succeeded. Errored rows are deliberately NOT
-# treated as done, so a resumed run retries them — most failures (Fable 5
-# safety-classifier refusals, timeouts, rate limits) are worth another try.
+# treated as done, so a resumed run retries them — most failures (timeouts,
+# rate limits) are worth another try. claude-fable-5 failures specifically
+# (safety-classifier refusals included) get an in-run retry against Opus 4.8
+# first, via cfg['fallback'] in factcheck_solver below — this resume path is
+# the second line of defense for the rarer case where both attempts fail.
 # ---------------------------------------------------------------------------
 
 def _load_done_ids(out_path: Path, model_key: str) -> set[str]:
@@ -338,17 +350,70 @@ def factcheck_solver(model_key: str = 'gpt-5.5-search', done_ids: frozenset[str]
         except Exception as exc:
             error = _scrub_secrets(f'{type(exc).__name__}: {exc}')
 
+        # Fallback: any failed call retries once against cfg['fallback'] (only
+        # claude-fable-5 sets this today — Anthropic refusals/ZDR-400s/timeouts
+        # all count, per-provider distinction isn't worth the complexity). The
+        # row still reports model_key='claude-fable-5' (keeps the panel's
+        # 5-model-per-claim join intact for aggregations.py/compare.py) but
+        # cost_eur/latency_s/sources fold in the fallback attempt, and
+        # fallback_used/fallback_model make the substitution fully traceable.
+        primary_sources = list(provider.last_sources)
+        fallback_used = False
+        fallback_model = ''
+        fallback_cfg = cfg.get('fallback')
+        if error and fallback_cfg:
+            primary_error = error
+            fallback_model = fallback_cfg['api_model']
+            fallback_provider = build_provider(fallback_cfg)
+            try:
+                raw = await asyncio.to_thread(
+                    fallback_provider.complete,
+                    system=SYSTEM_PROMPT,
+                    user=state.user_prompt.text,
+                    json_schema=VERDICT_JSON_SCHEMA if fallback_provider.supports_json_schema else None,
+                ) or ''
+                fallback_used = True
+                primary_cost = provider.cost_eur()
+                error = ''
+                provider = fallback_provider
+                cost_eur = primary_cost + provider.cost_eur()
+            except Exception as exc:
+                # Both attempts failed — keep the primary's failure reason (the
+                # one downstream refusal-classification keys off, per llm.py's
+                # empty-response RuntimeError comment) instead of discarding it,
+                # and still bill the primary attempt's cost.
+                primary_cost = provider.cost_eur()
+                fallback_error = _scrub_secrets(f'{type(exc).__name__}: {exc}')
+                error = f'{primary_error} | fallback {model_key}->{fallback_model} also failed: {fallback_error}'
+                provider = fallback_provider
+                cost_eur = primary_cost + provider.cost_eur()
+        else:
+            cost_eur = provider.cost_eur()
+
+        # Merge sources gathered by both attempts — a refused/errored primary
+        # call can still have run web searches before failing, and cost_eur
+        # above already sums both attempts' billing, so sources should too
+        # rather than silently dropping the primary's on a fallback.
+        sources = primary_sources + [s for s in provider.last_sources if s not in primary_sources]
+
         state.metadata.update({
-            'cost_eur': round(provider.cost_eur(), 6),
+            'cost_eur': round(cost_eur, 6),
             'latency_s': round(time.monotonic() - t0, 2),
-            'sources': list(provider.last_sources),
+            'sources': sources,
             'error': error,
             'model_key': model_key,
+            'fallback_used': fallback_used,
+            'fallback_model': fallback_model,
         })
 
         content = raw or error or '(no response)'
         state.messages.append(ChatMessageAssistant(content=content))
-        state.output = ModelOutput.from_content(model=cfg['api_model'], content=content)
+        # Reflect the model that actually produced `content` in Inspect's own
+        # transcript viewer, even though the results.jsonl row keeps
+        # model_key='claude-fable-5' for the panel join (see fallback_used above).
+        state.output = ModelOutput.from_content(
+            model=fallback_model if fallback_used else cfg['api_model'], content=content
+        )
         state.completed = True
         return state
 
@@ -411,6 +476,8 @@ def factcheck_scorer(out_path: str = 'data/results.jsonl'):
             'error': row_error,
             'raw_response': raw_response,
             'sources': state.metadata.get('sources', []),
+            'fallback_used': state.metadata.get('fallback_used', False),
+            'fallback_model': state.metadata.get('fallback_model', ''),
         }
         # Same reasoning as the solver's to_thread wrap: this does blocking
         # file I/O (read the whole jsonl, rewrite the json snapshot) — now

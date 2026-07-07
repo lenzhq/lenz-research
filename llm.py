@@ -505,7 +505,14 @@ _PROVIDERS: dict[str, type[LLMProvider]] = {
     'gemini': GeminiProvider,
 }
 
-_STANDARD_KEYS = {'provider', 'api_model', 'api_key_env', 'temperature', 'max_tokens', 'min_max_tokens'}
+_STANDARD_KEYS = {
+    'provider', 'api_model', 'api_key_env', 'temperature', 'max_tokens', 'min_max_tokens',
+    # 'fallback' is a PROVIDER_CONFIG-level directive (a full sibling config dict
+    # consumed by the caller when the primary provider errors) — not a provider
+    # __init__ kwarg. Without this, build_provider would fold it into **extra
+    # and it would land in the primary provider's self.extra unused.
+    'fallback',
+}
 
 
 def build_provider(cfg: dict[str, Any], *, max_tokens: int = DEFAULT_MAX_TOKENS) -> LLMProvider:

@@ -109,11 +109,30 @@ def main():
             'error': r.get('error', ''),
             'cost_eur': r.get('cost_eur', 0.0),
             'latency_s': r.get('latency_s', 0.0),
+            'fallback_used': r.get('fallback_used', False),
+            'fallback_model': r.get('fallback_model', ''),
         }
 
     # Build comparison entries
     all_models = sorted({r['model'] for r in results})
     comparison = []
+
+    # fallback_used rows count toward their nominal model's verdict in the
+    # stats below even though a different model actually produced the
+    # answer (see README's "claude-fable-5 fallback" note) — surface the
+    # substitution rate per model so it isn't silently invisible in the
+    # headline numbers.
+    fallback_counts: Counter = Counter()
+    fallback_targets: dict[str, set[str]] = {}
+    model_totals: Counter = Counter()
+    error_counts: Counter = Counter()
+    for r in results:
+        model_totals[r['model']] += 1
+        if r.get('fallback_used'):
+            fallback_counts[r['model']] += 1
+            fallback_targets.setdefault(r['model'], set()).add(r.get('fallback_model', '?'))
+        if r.get('error'):
+            error_counts[r['model']] += 1
 
     n_unanimous = 0
     n_split = 0
@@ -172,6 +191,22 @@ def main():
     print(f'  Unanimous:       {n_unanimous}  ({100*n_unanimous/n_claims:.1f}%)')
     print(f'  Split:           {n_split}  ({100*n_split/n_claims:.1f}%)')
     print(f'  All error:       {n_all_error}')
+    print()
+    print(f'  Errors per model:')
+    for model in all_models:
+        n = error_counts.get(model, 0)
+        total = model_totals[model]
+        print(f'    {model:30s}  {n}/{total}  ({100*n/total:.1f}%)')
+    if fallback_counts:
+        print()
+        for model in sorted(fallback_counts):
+            n = fallback_counts[model]
+            total = model_totals[model]
+            targets = '/'.join(sorted(fallback_targets[model]))
+            print(
+                f'  WARNING: {model} - {n}/{total} ({100*n/total:.1f}%) rows are '
+                f'fallback answers from {targets}, counted as {model} above'
+            )
     print()
 
     for label, count in sorted(verdict_disagreements.items()):

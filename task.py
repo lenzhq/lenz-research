@@ -15,10 +15,10 @@ Input format — each record must have at minimum:
 
 Usage — one model at a time:
     inspect eval task.py -T model_key=claude-fable-5
-    inspect eval task.py -T model_key=gpt-5.5-search
+    inspect eval task.py -T model_key=gpt-5.6-search
     inspect eval task.py -T model_key=gemini-3-retrieval
     inspect eval task.py -T model_key=sonar-deep-research
-    inspect eval task.py -T model_key=grok-4.3-search
+    inspect eval task.py -T model_key=grok-4.5-search
 
 View results:
     inspect view
@@ -310,7 +310,7 @@ def _append_and_resnapshot(row: dict, out_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 @solver
-def factcheck_solver(model_key: str = 'gpt-5.5-search', done_ids: frozenset[str] = frozenset()):
+def factcheck_solver(model_key: str = 'gpt-5.6-search', done_ids: frozenset[str] = frozenset()):
     async def solve(state: TaskState, generate: Generate) -> TaskState:
         # Resume: this sample already has a successful row for model_key in
         # out_path. Skip the API call entirely rather than re-billing it —
@@ -518,7 +518,7 @@ def factcheck_scorer(out_path: str = 'data/results.jsonl'):
 
 @task
 def factcheck(
-    model_key: str = 'gpt-5.5-search',
+    model_key: str = 'gpt-5.6-search',
     claims_file: str = 'data/claims.json',
     out_path: str = 'data/results.jsonl',
 ):

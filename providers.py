@@ -4,10 +4,10 @@ Five models evaluated at a medium reasoning tier — mid-level thinking + live
 retrieval + native JSON schema enforcement:
 
   claude-fable-5      Anthropic   adaptive thinking (effort=medium) + web search
-  gpt-5.5-search      OpenAI      reasoning_effort=medium + web search (medium context)
+  gpt-5.6-search      OpenAI      reasoning_effort=medium + web search (medium context)
   gemini-3-retrieval  Google      thinking_budget=16384 + Google Search grounding
   sonar-deep-research Perplexity  always-on multi-step deep research
-  grok-4.3-search     xAI         reasoning_effort=medium + web search
+  grok-4.5-search     xAI         reasoning_effort=medium + web search
 
 API keys are read from environment variables (see .env.example).
 
@@ -67,11 +67,14 @@ PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
             },
         },
     },
-    'gpt-5.5-search': {
+    'gpt-5.6-search': {
         'provider': 'openai-responses',
         'api_key_env': 'OPENAI_API_KEY',
-        'api_model': 'gpt-5.5',
-        'min_max_tokens': 32000,
+        'api_model': 'gpt-5.6-sol',
+        # 64000: bumped from 32000 (was gpt-5.5's setting) — Sol's reasoning +
+        # web-search rounds share the same truncation risk that made
+        # claude-fable-5 need 64K headroom; well within Sol's 128K output cap.
+        'min_max_tokens': 64000,
         'extra': {
             'web_search': {'search_context_size': 'medium'},
             'reasoning_effort': 'medium',
@@ -104,11 +107,13 @@ PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
             'excluded_domains': list(EXCLUDED_SOURCE_DOMAINS),
         },
     },
-    'grok-4.3-search': {
+    'grok-4.5-search': {
         'provider': 'xai-responses',
         'api_key_env': 'XAI_API_KEY',
-        'api_model': 'grok-4.3',
-        'min_max_tokens': 32000,
+        'api_model': 'grok-4.5',
+        # grok-4.5's hard output cap is 30K tokens (was 32000 for grok-4.3) —
+        # 28000 leaves safety margin instead of sitting at the exact boundary.
+        'min_max_tokens': 28000,
         'extra': {
             'web_search': {},
             'reasoning_effort': 'medium',

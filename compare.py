@@ -52,6 +52,35 @@ def verdict_spread(verdicts: list[str]) -> int:
     return len({v for v in verdicts if v})
 
 
+VERDICT_SCALE = {
+    'True': 0,
+    'Mostly True': 1,
+    'Mixed': 2,
+    'Mostly False': 3,
+    'False': 4,
+}
+
+
+def bucket_distance(verdicts: list[str]) -> int | None:
+    """Max pairwise gap among non-empty verdicts on the 5-point ordinal scale.
+
+    None if fewer than 2 verdicts map onto the known scale (all-error claims,
+    or a claim where only one model answered) — such claims have no
+    disagreement to measure and must not be silently counted as distance 0.
+    """
+    positions = [VERDICT_SCALE[v] for v in verdicts if v in VERDICT_SCALE]
+    if len(positions) < 2:
+        return None
+    return max(positions) - min(positions)
+
+
+def _row_key(r: dict) -> tuple[str, str]:
+    """(claim, model) identity — matches task.py's _cell_key. Used only to
+    diff results.jsonl against results.json's snapshot below; the claim-text
+    grouping key used elsewhere in this file (see by_claim) is separate."""
+    return (r.get('verification_id') or r.get('claim', ''), r.get('model', ''))
+
+
 def main():
     parser = argparse.ArgumentParser(description='Compare model verdicts per claim')
     parser.add_argument('--results', default='data/results.json')
@@ -62,18 +91,35 @@ def main():
         print(f'Error: {results_path} not found. Run task.py first (see README).')
         return
 
+    with open(results_path, encoding='utf-8') as f:
+        results = json.load(f)
+
     # task.py rewrites results.json from results.jsonl after every scored
     # sample — but a hard kill (OOM, kill -9) can still land between the two
     # writes, leaving results.json stale while the jsonl has newer rows.
+    # Checked by content (row keys), not mtime: a plain `git checkout`/clone
+    # can leave the two files' mtimes in either order regardless of which is
+    # actually current, so an mtime-only check false-positives on a
+    # freshly-checked-out working tree even when the content is identical.
     jsonl_path = results_path.with_suffix('.jsonl')
-    if jsonl_path.exists() and jsonl_path.stat().st_mtime > results_path.stat().st_mtime:
-        print(
-            f'WARNING: {jsonl_path} is newer than {results_path} — the eval may not have '
-            f'finished writing the final snapshot. These statistics may be stale or incomplete.\n'
-        )
-
-    with open(results_path, encoding='utf-8') as f:
-        results = json.load(f)
+    if jsonl_path.exists():
+        jsonl_rows = []
+        with jsonl_path.open(encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    jsonl_rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue  # tolerate a truncated last line from a prior crash
+        missing = {_row_key(r) for r in jsonl_rows} - {_row_key(r) for r in results}
+        if missing:
+            print(
+                f'WARNING: {jsonl_path} has {len(missing)} row(s) not reflected in '
+                f'{results_path} — the eval may not have finished writing the final '
+                f'snapshot. These statistics may be stale or incomplete.\n'
+            )
 
     if not results:
         print(f'No results in {results_path} — nothing to compare.')
@@ -138,6 +184,8 @@ def main():
     n_split = 0
     n_all_error = 0
     verdict_disagreements: Counter = Counter()
+    bucket_dist_counts: Counter = Counter()
+    n_claims_with_distance = 0
 
     for claim_text, entry in by_claim.items():
         models = entry['models']
@@ -147,6 +195,12 @@ def main():
         consensus, tied = majority_verdict(verdicts)
         spread = verdict_spread(verdicts)
         all_error = len(non_empty) == 0
+
+        dist = bucket_distance(verdicts)
+        entry['bucket_distance'] = dist
+        if dist is not None:
+            n_claims_with_distance += 1
+            bucket_dist_counts[dist] += 1
         # Unanimous among RESPONDING models — a model that errored out isn't
         # a dissenter. Previously this required every model (including
         # errored ones) to share a verdict, so a 4-agree/1-error claim fell
@@ -211,6 +265,16 @@ def main():
 
     for label, count in sorted(verdict_disagreements.items()):
         print(f'    {label}: {count}')
+
+    if n_claims_with_distance:
+        print()
+        print(
+            f'  Bucket distance (True=0 .. False=4, max pairwise gap per claim; '
+            f'{n_claims_with_distance}/{n_claims} claims have >=2 mapped verdicts):'
+        )
+        for threshold in (1, 2, 3, 4):
+            n = sum(c for d, c in bucket_dist_counts.items() if d >= threshold)
+            print(f'    {threshold}+ buckets apart:  {n:4d}  ({100*n/n_claims_with_distance:.1f}%)')
 
     # Print top disagreements — real splits and ties, not all-error claims
     # (all_error is tracked explicitly now; consensus=='' no longer implies

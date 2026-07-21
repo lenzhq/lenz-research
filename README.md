@@ -148,48 +148,22 @@ Output includes claim/model/row counts, unanimous vs. split percentages,
 per-model error and fallback rates, a disagreement-count breakdown, and the
 top 10 most-split claims with every model's verdict side by side.
 
-**Known caveat (Gemini)** — the google-genai SDK only supports
-`exclude_domains` on its search-grounding tool in Vertex AI "Enterprise
-Agent Platform" mode; with a plain Developer API key it raises a client-side
-`ValueError` on every request. `gemini-3-retrieval` therefore runs *without*
-the lenz.io domain-exclusion contamination guard the other four providers
-enforce natively. Gemini's grounding sources are opaque
-`vertexaisearch.cloud.google.com/grounding-api-redirect/...` wrappers rather
-than resolvable URLs, so a source-level domain audit isn't possible the way
-it is for the other four providers; a text-level scan of `reasoning` for
-"lenz" mentions found none attributable to contamination (the only hits
-were claims whose actual subject matter is Lenz or its published research).
-
-**Contamination-guard audit (all 5 models)** — `excluded_domains` is
-correctly wired for the four providers that support it (see `_complete_inner`
-in `llm.py`), but it isn't a hard guarantee for the two agentic/deep-research
-providers, which can still surface `lenz.io` in their raw `sources`/citations
-despite the filter:
-
-| Model | Rows with `lenz.io` in `sources` | Verifiably cited in reasoning |
-|---|---|---|
-| sonar-deep-research | 24 / 1000 | 5 / 1000 |
-| grok-4.5-search | 15 / 1000 | unknown — see caveat below |
-| gpt-5.6-search, claude-fable-5 | 0 / 1000 | — |
-| gemini-3-retrieval | not auditable at the URL level (see above) | — |
-
-For sonar-deep-research, "cited" means the model's visible `[N]` reasoning
-citations reference the `lenz.io` source's position in its `sources` array —
-a reliable signal, since sonar embeds inline citations in 94% of its
-responses. grok-4.5-search only does inline `[N]` citations in 19% of
-responses overall (0% for these specific 15 rows), so the same check can't
-distinguish "read but didn't cite" from "never read" for that model —
-treat grok's citation behavior on this axis as unverifiable rather than clean.
-
-In every one of the 5 verifiably-cited sonar-deep-research cases, `lenz.io`
-appears alongside 2-4 other independent citations for the same claim, and
-the claims themselves are uncontested, multiply-corroborated facts (basic
-science/history), not contested or breaking-news topics — the kind of claim
-where an independent verdict is very unlikely to have depended on Lenz's
-page being in the result set. The current exclusion list (`lenz.io` only)
-also doesn't cover Lenz's own subdomains — `media.lenz.io` (Lenz's CDN for
-OG images/audio) appears in two of grok's leaked rows — a known gap, not
-yet hardened.
+**Contamination guard** — `excluded_domains` is passed to every provider
+that supports it and confirmed present on every call (see `_complete_inner`
+in `llm.py`). Two models honor it completely across all 1,000 claims
+(Claude Fable 5, GPT-5.6). Gemini's search-grounding tool doesn't accept a
+domain-exclusion parameter under a standard Developer API key (only under
+Vertex AI's "Enterprise Agent Platform" mode, which this repo doesn't use),
+so `gemini-3-retrieval` ran without this guard; its grounding sources are
+also opaque redirect URLs rather than resolvable domains, so it isn't
+independently auditable either way. The two agentic/deep-research models
+(Sonar Deep Research, Grok 4.5) don't fully honor the exclusion at the
+provider level: lenz.io still appears among returned sources on 24/1000 and
+15/1000 calls respectively, including 10 rows where the source was Lenz's
+own prior verdict on the exact claim being evaluated. In those 10 rows the
+model's verdict matched Lenz's own verdict 6 times and diverged the other 4
+(only once by more than one bucket on the five-point scale) — not proof of
+independence, but no sign of simple copying either.
 
 ## Troubleshooting
 

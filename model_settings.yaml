@@ -54,11 +54,11 @@ models:
       retries_once_against: claude-opus-4-8   # same extra/thinking shape as above
       result_row: still model='claude-fable-5'; fallback_used=true, fallback_model='claude-opus-4-8'
 
-  gpt-5.5-search:
+  gpt-5.6-search:
     provider: openai-responses
-    api_model: gpt-5.5
+    api_model: gpt-5.6-sol   # bumped from gpt-5.5 (superseded 2026-07-09); config key renamed to match
     api_key_env: OPENAI_API_KEY
-    temperature: null        # OMITTED, not 0 — gpt-5.5 is in _FIXED_TEMPERATURE_MODELS; OpenAI
+    temperature: null        # OMITTED, not 0 — gpt-5.6 is in _FIXED_TEMPERATURE_MODELS (prefix match); OpenAI
                               # rejects a caller-supplied temperature on reasoning-effort models.
     reasoning_effort: medium
     web_search:
@@ -68,11 +68,12 @@ models:
     json_schema:
       supported: true
     max_tokens:
-      min: 32000
+      min: 64000   # bumped from 32000 — reasoning + web-search rounds share the truncation risk
+                    # that made claude-fable-5 need 64K; well within Sol's 128K output cap
     request_timeout_ms: 300000
     pricing_eur_per_1m_tokens:
-      input: 4.25
-      output: 25.50
+      input: 4.25   # $5 — same EUR price as gpt-5.5, coincidentally
+      output: 25.50  # $30
 
   gemini-3-retrieval:
     provider: gemini
@@ -118,11 +119,11 @@ models:
       input: 1.70
       output: 6.80
 
-  grok-4.3-search:
+  grok-4.5-search:
     provider: xai-responses      # subclasses OpenAIResponsesProvider
-    api_model: grok-4.3
+    api_model: grok-4.5   # bumped from grok-4.3 (superseded 2026-07-08); config key renamed to match
     api_key_env: XAI_API_KEY
-    temperature: 0.0            # EXPLICIT — 'grok-4.3' is not in _FIXED_TEMPERATURE_MODELS, so it
+    temperature: 0.0            # EXPLICIT — 'grok-4.5' is not in _FIXED_TEMPERATURE_MODELS, so it
                                  # goes through the same OpenAI-Responses code path but keeps temperature
     reasoning_effort: medium
     web_search:
@@ -131,13 +132,13 @@ models:
     json_schema:
       supported: true
     max_tokens:
-      min: 32000
+      min: 28000   # grok-4.5's hard output cap is 30K (was 32000 for grok-4.3) — 28000 leaves margin
     request_timeout_ms: 300000
     pricing_eur_per_1m_tokens:
-      input: 1.06
-      output: 2.13
+      input: 1.70    # $2
+      output: 5.10   # $6
 
 notes:
   temperature_summary:
-    "0 (explicit)": [gemini-3-retrieval, sonar-deep-research, grok-4.3-search]
-    "omitted (provider-fixed, not 0)": [claude-fable-5, gpt-5.5-search]
+    "0 (explicit)": [gemini-3-retrieval, sonar-deep-research, grok-4.5-search]
+    "omitted (provider-fixed, not 0)": [claude-fable-5, gpt-5.6-search]

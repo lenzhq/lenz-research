@@ -31,10 +31,12 @@ DEFAULT_MAX_TOKENS = 800
 MODEL_PRICING_EUR: dict[str, tuple[float, float]] = {
     'claude-opus-4': (4.25, 21.25),
     'claude-fable-5': (8.50, 42.50),  # $10 / $50 — 2x Opus 4.8; thinking always on, billed as output
-    'gpt-5.5': (4.25, 25.50),
+    'gpt-5.5': (4.25, 25.50),  # kept for pricing old historical results.json rows
+    'gpt-5.6-sol': (4.25, 25.50),  # $5 / $30 — same EUR price as gpt-5.5, coincidentally
     'gemini-3.1-pro': (1.70, 10.20),
     'sonar-deep-research': (1.70, 6.80),
-    'grok-4.3': (1.06, 2.13),
+    'grok-4.3': (1.06, 2.13),  # kept for pricing old historical results.json rows
+    'grok-4.5': (1.70, 5.10),  # $2 / $6
 }
 
 
@@ -261,7 +263,7 @@ class AnthropicProvider(LLMProvider):
 # ---------------------------------------------------------------------------
 
 class OpenAIResponsesProvider(LLMProvider):
-    _FIXED_TEMPERATURE_MODELS = {'gpt-5.4', 'gpt-5.5', 'gpt-5-nano', 'o1', 'o1-mini', 'o3', 'o3-mini'}
+    _FIXED_TEMPERATURE_MODELS = {'gpt-5.4', 'gpt-5.5', 'gpt-5.6', 'gpt-5-nano', 'o1', 'o1-mini', 'o3', 'o3-mini'}
 
     # OpenAI's web_search tool names its domain-blocklist field
     # `blocked_domains`. xAI's Responses API mirrors this tool shape but

@@ -217,3 +217,14 @@ Respond with a JSON object containing exactly these fields:
   "verdict": one of the five labels above
   "confidence_level": your level of certainty in the verdict on a 1 to 10 integer scale (1 = completely uncertain, 10 = fully certain)
 ```
+
+## License
+
+This repository is dual-licensed:
+
+- **Code** (the `*.py` files) is licensed under the [MIT License](LICENSE).
+- **Data** (everything in [`data/`](data/)) is licensed under the
+  [Creative Commons Attribution 4.0 International License (CC BY 4.0)](data/LICENSE).
+
+If you use the benchmark data in research or other work, please attribute
+Lenz (https://lenz.io).

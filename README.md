@@ -88,7 +88,7 @@ model pricing changes):
 
 Every scored sample is upserted into `data/results.jsonl` (one row per
 (claim, model) cell), and the deduped `data/results.json` snapshot is
-rewritten after each one, so `compare.py` (and the DB import) always read a
+rewritten after each one, so the Lenz DB import always reads a
 current, duplicate-free file. Pass `-T out_path=...` to keep a debugging run
 out of the shared file.
 
@@ -133,20 +133,6 @@ inspect eval task.py -T model_key=claude-fable-5 --limit 1-1000
 ```
 
 Results should match `data/results.jsonl` up to model non-determinism.
-
-**Compare model verdicts** once you have results for two or more models —
-`compare.py` groups `data/results.json` by claim, computes the majority
-verdict and spread across models, and prints a summary table plus the
-biggest disagreements:
-
-```bash
-python compare.py
-python compare.py --results data/results.json   # explicit path (default)
-```
-
-Output includes claim/model/row counts, unanimous vs. split percentages,
-per-model error and fallback rates, a disagreement-count breakdown, and the
-top 10 most-split claims with every model's verdict side by side.
 
 **Contamination guard** — `excluded_domains` is passed to every provider
 that supports it and confirmed present on every call (see `_complete_inner`

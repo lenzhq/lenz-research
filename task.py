@@ -38,7 +38,7 @@ _append_and_resnapshot below).
 
 In addition to Inspect's own .eval log, every scored sample is also
 upserted into data/results.jsonl and the deduped data/results.json snapshot
-is rewritten, so compare.py and the Lenz DB import script always read a
+is rewritten, so the Lenz DB import script always reads a
 current, duplicate-free file. Override the path with `-T out_path=...` to
 keep a debugging run out of the shared file.
 
@@ -47,7 +47,7 @@ ZDR-retention 400, etc.) retries once against claude-opus-4-8 before the
 sample is scored as an error (see PROVIDER_CONFIG['claude-fable-5']['fallback']
 in providers.py and factcheck_solver below). The result row still reports
 model='claude-fable-5' (keeps the panel's 5-model-per-claim shape intact for
-aggregations.py/compare.py), but carries `fallback_used: true` and
+downstream aggregation), but carries `fallback_used: true` and
 `fallback_model: 'claude-opus-4-8'` so the substitution is fully traceable —
 filter on `fallback_used` before treating a row as a genuine Fable 5 answer.
 """
@@ -354,7 +354,7 @@ def factcheck_solver(model_key: str = 'gpt-5.6-search', done_ids: frozenset[str]
         # claude-fable-5 sets this today — Anthropic refusals/ZDR-400s/timeouts
         # all count, per-provider distinction isn't worth the complexity). The
         # row still reports model_key='claude-fable-5' (keeps the panel's
-        # 5-model-per-claim join intact for aggregations.py/compare.py) but
+        # 5-model-per-claim join intact for downstream aggregation) but
         # cost_eur/latency_s/sources fold in the fallback attempt, and
         # fallback_used/fallback_model make the substitution fully traceable.
         primary_sources = list(provider.last_sources)
@@ -429,8 +429,8 @@ def factcheck_solver(model_key: str = 'gpt-5.6-search', done_ids: frozenset[str]
 # metric silently report 0% for every model on every run — a number that
 # looks like a real result but measures nothing. This scorer instead just
 # records the verdict/reasoning/cost as metadata, viewable via `inspect
-# view`; use compare.py (or a gold-label join keyed on verification_id) to
-# actually grade harvested verdicts.
+# view`; use a gold-label join keyed on verification_id to actually grade
+# harvested verdicts.
 
 @scorer(metrics=[])
 def factcheck_scorer(out_path: str = 'data/results.jsonl'):

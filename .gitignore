@@ -8,5 +8,19 @@ __pycache__/
 logs/
 .venv/
 venv/
-data/results-max.json
-data/results-max.jsonl
+
+# data/ is allow-listed, not deny-listed.
+#
+# Only the four files below ship. Everything else that lands in data/ is local
+# scratch, and several of those working files carry Lenz's own verdict labels
+# (lenz_verdict / lenz_score / lenz_reason). This repo must never publish a
+# verdict label: the claims are sourced from Lenz, so shipping Lenz's answer
+# alongside them would hand any reader a gold key the models were deliberately
+# denied, and would contradict both the README and the paper's ethics
+# statement. A deny-list would leak the next scratch file someone forgets to
+# add; an allow-list fails closed.
+data/*
+!data/claims.json
+!data/results.json
+!data/results.jsonl
+!data/LICENSE

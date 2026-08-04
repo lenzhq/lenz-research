@@ -177,7 +177,8 @@ interceptor you already know about.
 ## Prompt
 
 Each model receives a **system prompt** and a **user prompt**. `{date}` and
-`{claim}` are filled in per claim.
+`{claim}` are filled in per claim. `{date}` is the date the claim was submitted
+to Lenz, which pins each model to the claim's submission-time epistemic frame.
 
 **System prompt:**
 
@@ -213,4 +214,13 @@ This repository is dual-licensed:
   [Creative Commons Attribution 4.0 International License (CC BY 4.0)](data/LICENSE).
 
 If you use the benchmark data in research or other work, please attribute
-Lenz (https://lenz.io).
+Lenz (https://lenz.io):
+
+> Jordanov, K., Yordanov, D., and Jordanova, Y. (2026). *Beyond Benchmarks:
+> Disagreement Among Frontier LLMs on Real-World Fact-Checks.* Lenz.
+
+**What ships.** `data/` is allow-listed in `.gitignore`: only `claims.json`,
+`results.json`, `results.jsonl` and `LICENSE` are tracked. Local working files
+in that directory are deliberately excluded — several carry Lenz's own verdict
+labels, and publishing those would hand a reader the gold key the panel was
+denied.

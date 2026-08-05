@@ -11,7 +11,7 @@ venv/
 
 # data/ is allow-listed, not deny-listed.
 #
-# Only the four files below ship. Everything else that lands in data/ is local
+# Only the five files below ship. Everything else that lands in data/ is local
 # scratch, and several of those working files carry Lenz's own verdict labels
 # (lenz_verdict / lenz_score / lenz_reason). This repo must never publish a
 # verdict label: the claims are sourced from Lenz, so shipping Lenz's answer
@@ -23,4 +23,5 @@ data/*
 !data/claims.json
 !data/results.json
 !data/results.jsonl
+!data/results.csv
 !data/LICENSE

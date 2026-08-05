@@ -41,6 +41,21 @@ out. A JSON array of records:
 An erroring cell carries the same shape with `verdict`/`confidence`/`raw_response`
 empty and `error` set to the exception message.
 
+`data/results.csv` — the same 5,000 rows as a spreadsheet, for readers who would
+rather not parse JSON. Columns: `claim`, `date`, `category`, `verification_id`,
+`model`, `verdict`, `confidence`, `reasoning`, `sources`, `cost_eur`,
+`latency_s`, `error`, `fallback_used`, `fallback_model`. It drops
+`raw_response` (the unparsed provider payload), which stays in the JSON files.
+
+**This is the raw harvest, not the analysis.** One row per (claim × model), so a
+claim occupies five rows and nothing here compares the models to each other. The
+per-claim disagreement measures reported in the paper — the five verdicts side
+by side and `max_pairwise_bucket_distance` on the 5-point scale — are a separate
+997-row export served from the frozen research snapshot, not this file. To
+derive the distance yourself, pivot on `verification_id`, map each verdict onto
+`True`=0 … `False`=4, and take the maximum minus the minimum across the five
+rows.
+
 **claude-fable-5 fallback:** any failed claude-fable-5 call (safety-classifier
 refusal, timeout, rate limit, the ZDR-retention 400, etc.) retries once against
 claude-opus-4-8 rather than being recorded as an error. The row still reports
@@ -72,19 +87,6 @@ this can happen before a single sample is scored.
 ```powershell
 $env:PYTHONIOENCODING = "utf-8"
 ```
-
-**Estimated cost** for a full 1,000-claim run, computed from this repo's own
-observed per-claim averages (your actual cost will vary with claim mix and
-model pricing changes):
-
-| Model | Avg €/claim | Est. for 1,000 claims |
-|---|---|---|
-| claude-fable-5 | 0.18 | ~€180 |
-| gpt-5.6-search | 0.12 | ~€122 |
-| gemini-3-retrieval | 0.02 | ~€16 |
-| sonar-deep-research | <0.01 | ~€2 |
-| grok-4.5-search | 0.14 | ~€135 |
-| **Total (all 5 models)** | | **~€455** |
 
 Every scored sample is upserted into `data/results.jsonl` (one row per
 (claim, model) cell), and the deduped `data/results.json` snapshot is
@@ -220,7 +222,7 @@ Lenz (https://lenz.io):
 > Disagreement Among Frontier LLMs on Real-World Fact-Checks.* Lenz.
 
 **What ships.** `data/` is allow-listed in `.gitignore`: only `claims.json`,
-`results.json`, `results.jsonl` and `LICENSE` are tracked. Local working files
-in that directory are deliberately excluded — several carry Lenz's own verdict
-labels, and publishing those would hand a reader the gold key the panel was
-denied.
+`results.json`, `results.jsonl`, `results.csv` and `LICENSE` are tracked. Local
+working files in that directory are deliberately excluded — several carry Lenz's
+own verdict labels, and publishing those would hand a reader the gold key the
+panel was denied.

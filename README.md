@@ -82,9 +82,18 @@ model pricing changes):
 | claude-fable-5 | 0.18 | ~€180 |
 | gpt-5.6-search | 0.12 | ~€122 |
 | gemini-3-retrieval | 0.02 | ~€16 |
-| sonar-deep-research | <0.01 | ~€2 |
-| grok-4.5-search | 0.14 | ~€135 |
-| **Total (all 5 models)** | | **~€455** |
+| sonar-deep-research | <0.01 † | ~€2 † |
+| grok-4.5-search | 0.16 | ~€161 |
+| **Total (all 5 models)** | | **~€482** † |
+
+† **Sonar Deep Research's figure is an undercount, not a bargain — and the
+total inherits it.** `cost_eur` is computed from the `prompt_tokens` /
+`completion_tokens` the provider returns (see `cost_eur` in `llm.py`). For
+this model those cover only the final synthesis call; Perplexity bills deep
+research separately for citation tokens, reasoning tokens and per-search
+fees, none of which appear in either field. The true figure is materially
+higher and this repo cannot measure it. Treat the other four rows as
+comparable to each other, and this one — with the total — as a floor.
 
 Every scored sample is upserted into `data/results.jsonl` (one row per
 (claim, model) cell), and the deduped `data/results.json` snapshot is

@@ -14,22 +14,22 @@ Input format — each record must have at minimum:
                        persisted anywhere in this repo.
 
 Usage — one model at a time:
-    inspect eval harness/task.py -T model_key=claude-fable-5
-    inspect eval harness/task.py -T model_key=gpt-5.6-search
-    inspect eval harness/task.py -T model_key=gemini-3-retrieval
-    inspect eval harness/task.py -T model_key=sonar-deep-research
-    inspect eval harness/task.py -T model_key=grok-4.5-search
+    inspect eval task.py -T model_key=claude-fable-5
+    inspect eval task.py -T model_key=gpt-5.6-search
+    inspect eval task.py -T model_key=gemini-3-retrieval
+    inspect eval task.py -T model_key=sonar-deep-research
+    inspect eval task.py -T model_key=grok-4.5-search
 
 View results:
     inspect view
 
-Bundled runs (inspect studies/llm-disagreement/data/results.json between bundles) — one model, 50
+Bundled runs (inspect data/results.json between bundles) — one model, 50
 claims at a time. Inspect's --limit takes a 1-indexed, inclusive range
 (--limit 1-50 means samples 1 through 50) — all bundles write into the
-same studies/llm-disagreement/data/results.jsonl:
-    inspect eval harness/task.py -T model_key=claude-fable-5 --limit 1-50
-    inspect eval harness/task.py -T model_key=claude-fable-5 --limit 51-100
-    inspect eval harness/task.py -T model_key=claude-fable-5 --limit 101-150
+same data/results.jsonl:
+    inspect eval task.py -T model_key=claude-fable-5 --limit 1-50
+    inspect eval task.py -T model_key=claude-fable-5 --limit 51-100
+    inspect eval task.py -T model_key=claude-fable-5 --limit 101-150
 
 Re-running a range is safe: samples that already have a successful row for
 this model in out_path are skipped without an API call, and errored rows
@@ -37,8 +37,7 @@ are retried with their line replaced in place (see _load_done_ids /
 _append_and_resnapshot below).
 
 In addition to Inspect's own .eval log, every scored sample is also
-upserted into studies/llm-disagreement/data/results.jsonl and the deduped
-studies/llm-disagreement/data/results.json snapshot
+upserted into data/results.jsonl and the deduped data/results.json snapshot
 is rewritten, so the Lenz DB import script always reads a
 current, duplicate-free file. Override the path with `-T out_path=...` to
 keep a debugging run out of the shared file.
@@ -71,10 +70,10 @@ from inspect_ai.model import ChatMessageAssistant, ModelOutput
 from inspect_ai.scorer import Score, Target, scorer
 from inspect_ai.solver import Generate, TaskState, solver
 
-# Inspect loads this file as a top-level module (`inspect eval
-# harness/task.py` from the repo root), so the sibling harness modules are
-# not importable via package syntax — put this directory on sys.path and
-# keep the flat imports.
+# Inspect loads this file as a top-level module, so the sibling modules
+# (llm.py, providers.py) are not importable via package syntax — put this
+# directory on sys.path and keep the flat imports. Run from THIS study
+# directory (data paths are relative to it).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from llm import build_provider  # noqa: E402
@@ -441,7 +440,7 @@ def factcheck_solver(model_key: str = 'gpt-5.6-search', done_ids: frozenset[str]
 # harvested verdicts.
 
 @scorer(metrics=[])
-def factcheck_scorer(out_path: str = 'studies/llm-disagreement/data/results.jsonl'):
+def factcheck_scorer(out_path: str = 'data/results.jsonl'):
     out = Path(out_path)
 
     async def score(state: TaskState, target: Target) -> Score:
@@ -527,8 +526,8 @@ def factcheck_scorer(out_path: str = 'studies/llm-disagreement/data/results.json
 @task
 def factcheck(
     model_key: str = 'gpt-5.6-search',
-    claims_file: str = 'studies/llm-disagreement/data/claims.json',
-    out_path: str = 'studies/llm-disagreement/data/results.jsonl',
+    claims_file: str = 'data/claims.json',
+    out_path: str = 'data/results.jsonl',
 ):
     dataset = json_dataset(claims_file, _record_to_sample)
 

@@ -5,8 +5,9 @@ LLMs on Real-World Fact-Checks** — published at
 [lenz.io/research/llm-disagreement](https://lenz.io/research/llm-disagreement).
 Canonical home of this package:
 [github.com/lenzhq/lenz-research](https://github.com/lenzhq/lenz-research),
-under `studies/llm-disagreement/`; the shared runner lives in
-[`harness/`](../../harness/).
+under `studies/llm-disagreement/`. The study is self-contained: the exact
+code, configuration, corpus, and results that produced the paper live in
+this directory and are frozen together.
 
 We evaluate five frontier LLMs on 1,000 real-world fact-checking claims sourced
 from [Lenz](https://lenz.io) — a live fact-checking platform. Each model uses
@@ -81,16 +82,16 @@ fallback attempt.
 
 ## Reproduce
 
-Primary path is `harness/task.py` via [Inspect AI](https://inspect.aisi.org.uk/) — one
+Primary path is `task.py` via [Inspect AI](https://inspect.aisi.org.uk/) — one
 model per invocation, with Inspect's own transcript viewer for stepping
 through a run turn-by-turn:
 
-From the **repo root**:
+From **this directory** (`studies/llm-disagreement/`):
 
 ```bash
 pip install -r requirements.txt
 cp .env.example .env   # fill in your API keys
-inspect eval harness/task.py -T model_key=claude-fable-5
+inspect eval task.py -T model_key=claude-fable-5
 inspect view
 ```
 
@@ -104,10 +105,9 @@ this can happen before a single sample is scored.
 $env:PYTHONIOENCODING = "utf-8"
 ```
 
-Every scored sample is upserted into `data/results.jsonl` here (the runner
-writes `studies/llm-disagreement/data/results.jsonl` relative to the repo
-root — one row per (claim, model) cell), and the deduped `data/results.json`
-snapshot is rewritten after each one, so the Lenz DB import always reads a
+Every scored sample is upserted into `data/results.jsonl` (one row per
+(claim, model) cell), and the deduped `data/results.json` snapshot is
+rewritten after each one, so the Lenz DB import always reads a
 current, duplicate-free file. Pass `-T out_path=...` to keep a debugging run
 out of the shared file.
 
@@ -117,7 +117,7 @@ that's the effective throttle on how fast a run burns through claims. Raise it
 it explicitly to pin the behavior instead of relying on the default:
 
 ```bash
-inspect eval harness/task.py -T model_key=claude-fable-5 --max-connections 10
+inspect eval task.py -T model_key=claude-fable-5 --max-connections 10
 ```
 
 **Bundled runs** — one model, 50 claims at a time, inspecting
@@ -125,16 +125,16 @@ inspect eval harness/task.py -T model_key=claude-fable-5 --max-connections 10
 inclusive range:
 
 ```bash
-inspect eval harness/task.py -T model_key=claude-fable-5 --limit 1-50
-inspect eval harness/task.py -T model_key=claude-fable-5 --limit 51-100
-inspect eval harness/task.py -T model_key=claude-fable-5 --limit 101-150
+inspect eval task.py -T model_key=claude-fable-5 --limit 1-50
+inspect eval task.py -T model_key=claude-fable-5 --limit 51-100
+inspect eval task.py -T model_key=claude-fable-5 --limit 101-150
 ```
 
 **Don't run two `inspect eval` invocations at the same time** (e.g. two
 different models in separate terminals), even though each targets a
 different `model_key`. Every invocation upserts into the *same*
 `data/results.jsonl` / `data/results.json` (see `_append_and_resnapshot` in
-`harness/task.py`), and the write lock guarding that read-modify-write is an
+`task.py`), and the write lock guarding that read-modify-write is an
 in-process `threading.Lock` — it does nothing across two separate OS
 processes. On Windows this reliably surfaces as a `PermissionError` on
 `os.replace()` (`results.jsonl.tmp` -> `results.jsonl`) and can interrupt a
@@ -148,14 +148,14 @@ failures) are retried and their line replaced in place. So after a partial
 failure, just re-run the full range:
 
 ```bash
-inspect eval harness/task.py -T model_key=claude-fable-5 --limit 1-1000
+inspect eval task.py -T model_key=claude-fable-5 --limit 1-1000
 ```
 
 Results should match `data/results.jsonl` up to model non-determinism.
 
 **Contamination guard** — `excluded_domains` is passed to every provider
 that supports it and confirmed present on every call (see `_complete_inner`
-in `harness/llm.py`). Two models honor it completely across all 1,000 claims
+in `llm.py`). Two models honor it completely across all 1,000 claims
 (Claude Fable 5, GPT-5.6). Gemini's search-grounding tool doesn't accept a
 domain-exclusion parameter under a standard Developer API key (only under
 Vertex AI's "Enterprise Agent Platform" mode, which this repo doesn't use),
@@ -228,7 +228,7 @@ Respond with a JSON object containing exactly these fields:
 
 This repository is dual-licensed:
 
-- **Code** (the `*.py` files in [`harness/`](../../harness/)) is licensed under the [MIT License](../../LICENSE).
+- **Code** (the `*.py` files) is licensed under the [MIT License](../../LICENSE).
 - **Data** (everything in [`data/`](data/)) is licensed under the
   [Creative Commons Attribution 4.0 International License (CC BY 4.0)](data/LICENSE).
 

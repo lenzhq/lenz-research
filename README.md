@@ -35,3 +35,7 @@ Dual-licensed:
 
 If you use the data in research or other work, please attribute
 Lenz (https://lenz.io). Citation details are in each study's README.
+
+## Maintainer
+
+[@David19782](https://github.com/David19782)

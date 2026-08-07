@@ -14,22 +14,22 @@ Input format — each record must have at minimum:
                        persisted anywhere in this repo.
 
 Usage — one model at a time:
-    inspect eval task.py -T model_key=claude-fable-5
-    inspect eval task.py -T model_key=gpt-5.6-search
-    inspect eval task.py -T model_key=gemini-3-retrieval
-    inspect eval task.py -T model_key=sonar-deep-research
-    inspect eval task.py -T model_key=grok-4.5-search
+    inspect eval harness/task.py -T model_key=claude-fable-5
+    inspect eval harness/task.py -T model_key=gpt-5.6-search
+    inspect eval harness/task.py -T model_key=gemini-3-retrieval
+    inspect eval harness/task.py -T model_key=sonar-deep-research
+    inspect eval harness/task.py -T model_key=grok-4.5-search
 
 View results:
     inspect view
 
-Bundled runs (inspect data/results.json between bundles) — one model, 50
+Bundled runs (inspect studies/llm-disagreement/data/results.json between bundles) — one model, 50
 claims at a time. Inspect's --limit takes a 1-indexed, inclusive range
 (--limit 1-50 means samples 1 through 50) — all bundles write into the
-same data/results.jsonl:
-    inspect eval task.py -T model_key=claude-fable-5 --limit 1-50
-    inspect eval task.py -T model_key=claude-fable-5 --limit 51-100
-    inspect eval task.py -T model_key=claude-fable-5 --limit 101-150
+same studies/llm-disagreement/data/results.jsonl:
+    inspect eval harness/task.py -T model_key=claude-fable-5 --limit 1-50
+    inspect eval harness/task.py -T model_key=claude-fable-5 --limit 51-100
+    inspect eval harness/task.py -T model_key=claude-fable-5 --limit 101-150
 
 Re-running a range is safe: samples that already have a successful row for
 this model in out_path are skipped without an API call, and errored rows
@@ -37,7 +37,8 @@ are retried with their line replaced in place (see _load_done_ids /
 _append_and_resnapshot below).
 
 In addition to Inspect's own .eval log, every scored sample is also
-upserted into data/results.jsonl and the deduped data/results.json snapshot
+upserted into studies/llm-disagreement/data/results.jsonl and the deduped
+studies/llm-disagreement/data/results.json snapshot
 is rewritten, so the Lenz DB import script always reads a
 current, duplicate-free file. Override the path with `-T out_path=...` to
 keep a debugging run out of the shared file.
@@ -57,6 +58,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import sys
 import threading
 import time
 from pathlib import Path
@@ -69,13 +71,19 @@ from inspect_ai.model import ChatMessageAssistant, ModelOutput
 from inspect_ai.scorer import Score, Target, scorer
 from inspect_ai.solver import Generate, TaskState, solver
 
-from llm import build_provider
-from providers import PROVIDER_CONFIG
+# Inspect loads this file as a top-level module (`inspect eval
+# harness/task.py` from the repo root), so the sibling harness modules are
+# not importable via package syntax — put this directory on sys.path and
+# keep the flat imports.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from llm import build_provider  # noqa: E402
+from providers import PROVIDER_CONFIG  # noqa: E402
 
 load_dotenv()
 
-# Same scrub as harvest.py: SDK auth-failure exceptions can echo partial key
-# material, and this lands in Inspect's persisted eval log.
+# SDK auth-failure exceptions can echo partial key material, and this lands
+# in Inspect's persisted eval log — scrub before anything is stored.
 _SECRET_PATTERN = re.compile(r'\b(sk-[A-Za-z0-9_-]{10,}|xai-[A-Za-z0-9_-]{10,}|AIza[A-Za-z0-9_-]{10,}|pplx-[A-Za-z0-9_-]{10,})\b')
 
 
@@ -128,7 +136,7 @@ _NORMALIZER = {v.lower(): v for v in VERDICT_BUCKETS}
 # ---------------------------------------------------------------------------
 
 def _record_to_sample(record: dict) -> Sample:
-    # No `target=` — data/claims.json has no gold verdict by design (see the
+    # No `target=` — the claims corpus has no gold verdict by design (see the
     # scorer below), so Sample's default empty target is the honest value,
     # not a lookup into a field that will never be there.
     #
@@ -165,7 +173,7 @@ _decoder = json.JSONDecoder()
 def _parse_verdict(raw: str) -> tuple[str, int, str]:
     """Return (verdict, confidence, reasoning) or ('', 0, '') on failure.
 
-    Kept in parity with harvest.py's parse_response/_extract_json: same
+    Same parse contract as the retired pre-Inspect harness (see git history): same
     trailing-content tolerance (raw_decode, not loads) and the same 1-10
     confidence range check, so the Inspect harness and the harvest script
     don't grade identical model output differently.
@@ -200,8 +208,8 @@ def _parse_verdict(raw: str) -> tuple[str, int, str]:
 
 # ---------------------------------------------------------------------------
 # Resume — skip samples with a successful prior attempt for this model_key,
-# same semantics as harvest.py's _load_prior_results/done set. Unlike
-# harvest.py, task.py previously had no resume awareness at all: re-running
+# same load-prior/done-set semantics as the retired pre-Inspect harness
+# (git history). task.py previously had no resume awareness at all: re-running
 # the same --limit range re-evaluated (and re-billed) every sample in it,
 # including ones that already succeeded. Errored rows are deliberately NOT
 # treated as done, so a resumed run retries them — most failures (timeouts,
@@ -235,7 +243,7 @@ def _load_done_ids(out_path: Path, model_key: str) -> set[str]:
 
 # ---------------------------------------------------------------------------
 # results.jsonl / results.json — same shape and dedup semantics as
-# harvest.py, so the two harnesses' output is interchangeable.
+# the retired harness, so historical and current output stay interchangeable.
 # ---------------------------------------------------------------------------
 
 _write_lock = threading.Lock()
@@ -249,10 +257,10 @@ def _append_and_resnapshot(row: dict, out_path: Path) -> None:
     """Upsert `row` into out_path (jsonl, one row per (claim, model)) and
     rewrite the deduped .json snapshot alongside it.
 
-    NOTE: despite the name (kept for continuity with harvest.py, which is
+    NOTE: despite the name (kept for continuity with the retired harness, which is
     still genuinely append-only), this rewrites the whole file rather than
     appending — a re-scored cell replaces its existing line in place instead
-    of adding a second line for the same (claim, model). harvest.py keeps
+    of adding a second line for the same (claim, model). The retired harness kept
     true append-only semantics (crash-safe, no read-modify-write), with
     dedup only in its separate results.json snapshot; this version trades
     that crash-safety margin for never having two rows in results.jsonl
@@ -269,7 +277,7 @@ def _append_and_resnapshot(row: dict, out_path: Path) -> None:
     calls across real OS threads (blocking synchronous SDK calls can't run
     on a single asyncio event loop without serializing everything), so
     concurrent scorer invocations can race on this file exactly like
-    harvest.py's ThreadPoolExecutor workers do.
+    the retired harness's ThreadPoolExecutor workers did.
     """
     with _write_lock:
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -423,7 +431,7 @@ def factcheck_solver(model_key: str = 'gpt-5.6-search', done_ids: frozenset[str]
 # Scorer
 # ---------------------------------------------------------------------------
 #
-# No accuracy metric: data/claims.json carries verification_id (an opaque join key
+# No accuracy metric: the claims corpus carries verification_id (an opaque join key
 # back to the source system) but deliberately no gold verdict field.
 # Scoring against target.text (always '') would let Inspect's accuracy()
 # metric silently report 0% for every model on every run — a number that
@@ -433,7 +441,7 @@ def factcheck_solver(model_key: str = 'gpt-5.6-search', done_ids: frozenset[str]
 # harvested verdicts.
 
 @scorer(metrics=[])
-def factcheck_scorer(out_path: str = 'data/results.jsonl'):
+def factcheck_scorer(out_path: str = 'studies/llm-disagreement/data/results.jsonl'):
     out = Path(out_path)
 
     async def score(state: TaskState, target: Target) -> Score:
@@ -450,7 +458,7 @@ def factcheck_scorer(out_path: str = 'data/results.jsonl'):
         provider_error = state.metadata.get('error', '')
 
         if provider_error:
-            # Mirrors harvest.py's `if error:` branch — provider call
+            # Mirrors the retired harness's `if error:` branch — provider call
             # itself failed, so state.output.completion holds the error
             # text (the solver's fallback content), not a model response.
             # Don't parse it as one.
@@ -519,8 +527,8 @@ def factcheck_scorer(out_path: str = 'data/results.jsonl'):
 @task
 def factcheck(
     model_key: str = 'gpt-5.6-search',
-    claims_file: str = 'data/claims.json',
-    out_path: str = 'data/results.jsonl',
+    claims_file: str = 'studies/llm-disagreement/data/claims.json',
+    out_path: str = 'studies/llm-disagreement/data/results.jsonl',
 ):
     dataset = json_dataset(claims_file, _record_to_sample)
 

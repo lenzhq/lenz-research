@@ -49,8 +49,8 @@ def _lookup_pricing(model: str) -> tuple[float, float]:
             best_prices = prices
     if not best_prefix:
         # Silent €0.00 here means a renamed/unrecognized model's entire cost
-        # column reads zero with no signal — loud enough to be seen in the
-        # per-cell harvest.py output, not just a swallowed log line.
+        # column reads zero with no signal — print loudly so it is seen in
+        # per-cell run output, not just a swallowed log line.
         print(f'WARNING: no pricing entry for model {model!r} — cost will read as €0.00')
     return best_prices
 

@@ -5,6 +5,6 @@
 # not cosmetic: 261 of its newlines sit *inside* quoted `reasoning` fields, so
 # a blanket conversion edits the model's own text and the clone no longer
 # matches the published bytes or any checksum taken over them.
-data/*.csv   -text
-data/*.json  -text
-data/*.jsonl -text
+studies/*/data/*.csv   -text
+studies/*/data/*.json  -text
+studies/*/data/*.jsonl -text

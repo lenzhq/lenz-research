@@ -58,6 +58,15 @@ operator-local pricing table (`pricing.json`, gitignored — see
 `pricing.example.json`), so its unit is whatever currency that table was
 written in. The repo deliberately ships no prices.
 
+**`sonar-deep-research`'s `cost` is an undercount, not a bargain.** The
+number is derived from the input/output token counts the provider returns
+(see `cost()` in `llm.py`), and for deep research those cover only the
+final synthesis call — Perplexity bills citation tokens, reasoning tokens
+and per-search fees separately, and none of them appear in either field.
+The true cost is materially higher and this repo cannot measure it. Treat
+the other four models' `cost` values as comparable to each other, and this
+model's — and any total that includes it — as a floor.
+
 `data/results.csv` — the same 5,000 rows as a spreadsheet, for readers who would
 rather not parse JSON. Columns: `claim`, `date`, `category`, `verification_id`,
 `model`, `verdict`, `confidence`, `reasoning`, `sources`, `cost`,

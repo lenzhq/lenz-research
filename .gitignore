@@ -9,19 +9,21 @@ logs/
 .venv/
 venv/
 
-# data/ is allow-listed, not deny-listed.
+# Study data directories are allow-listed, not deny-listed.
 #
-# Only the five files below ship. Everything else that lands in data/ is local
-# scratch, and several of those working files carry Lenz's own verdict labels
-# (lenz_verdict / lenz_score / lenz_reason). This repo must never publish a
-# verdict label: the claims are sourced from Lenz, so shipping Lenz's answer
-# alongside them would hand any reader a gold key the models were deliberately
-# denied, and would contradict both the README and the paper's ethics
-# statement. A deny-list would leak the next scratch file someone forgets to
-# add; an allow-list fails closed.
-data/*
-!data/claims.json
-!data/results.json
-!data/results.jsonl
-!data/results.csv
-!data/LICENSE
+# Only the five files below ship. Everything else that lands in a study's
+# data/ is local scratch, and several of those working files carry Lenz's own
+# verdict labels (lenz_verdict / lenz_score / lenz_reason). This repo must
+# never publish a verdict label: the claims are sourced from Lenz, so shipping
+# Lenz's answer alongside them would hand any reader a gold key the models
+# were deliberately denied, and would contradict both the README and the
+# paper's ethics statement. A deny-list would leak the next scratch file
+# someone forgets to add; an allow-list fails closed.
+#
+# When adding a new study, replicate this block for its data/ directory.
+studies/llm-disagreement/data/*
+!studies/llm-disagreement/data/claims.json
+!studies/llm-disagreement/data/results.json
+!studies/llm-disagreement/data/results.jsonl
+!studies/llm-disagreement/data/results.csv
+!studies/llm-disagreement/data/LICENSE

@@ -1,5 +1,5 @@
-The benchmark dataset in this directory (the `data/` folder of the
-lenz-benchmarks repository) is:
+The benchmark dataset in this directory (the `studies/llm-disagreement/data/`
+folder of the lenz-research repository) is:
 
     Copyright (c) 2026 Lenz
     Licensed under the Creative Commons Attribution 4.0 International License

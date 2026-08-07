@@ -1,41 +1,35 @@
 # lenz-research
 
 Reproducibility packages for [Lenz](https://lenz.io) research, published at
-[lenz.io/research](https://lenz.io/research). Each study ships its corpus,
-raw results, and a frozen reference to the exact code that produced them;
-the shared evaluation runner lives in [`harness/`](harness/).
+[lenz.io/research](https://lenz.io/research).
 
-## Layout
-
-```
-harness/                 shared evaluation harness (Inspect AI task, provider
-                         pool, pricing) — run from the repo root
-studies/
-  llm-disagreement/      "Beyond Benchmarks: Disagreement Among Frontier LLMs
-                         on Real-World Fact-Checks" — corpus, raw results,
-                         and study README
-```
+Each study under `studies/` is **self-contained**: the exact code,
+provider configuration, corpus, and raw results that produced its paper
+live in one directory and freeze together. New studies start by copying
+the previous study's code — shared machinery gets factored out only once
+several studies prove a stable common shape.
 
 ## Studies
 
 | Study | Paper | Contents |
 |---|---|---|
-| [`studies/llm-disagreement/`](studies/llm-disagreement/) | [Beyond Benchmarks: Disagreement Among Frontier LLMs on Real-World Fact-Checks](https://lenz.io/research/llm-disagreement) | 1,000-claim corpus, 5,000-row five-model harvest (JSON/JSONL/CSV) |
+| [`studies/llm-disagreement/`](studies/llm-disagreement/) | [Beyond Benchmarks: Disagreement Among Frontier LLMs on Real-World Fact-Checks](https://lenz.io/research/llm-disagreement) | Inspect AI runner, five-model panel config, 1,000-claim corpus, 5,000-row harvest (JSON/JSONL/CSV) |
 
 Each study's README carries its models, dataset documentation, reproduction
-steps, and prompt. Reproduction runs execute from the repo root, e.g.:
+steps, and prompt. Reproduction runs execute from the study's own directory:
 
 ```bash
+cd studies/llm-disagreement
 pip install -r requirements.txt
 cp .env.example .env   # fill in your API keys
-inspect eval harness/task.py -T model_key=claude-fable-5
+inspect eval task.py -T model_key=claude-fable-5
 ```
 
 ## License
 
 Dual-licensed:
 
-- **Code** (`harness/`) — [MIT License](LICENSE).
+- **Code** (each study's `*.py` files) — [MIT License](LICENSE).
 - **Data** (each study's `data/` directory) — [Creative Commons Attribution
   4.0 International (CC BY 4.0)](studies/llm-disagreement/data/LICENSE).
 

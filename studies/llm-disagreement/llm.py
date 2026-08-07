@@ -7,9 +7,11 @@ provider SDKs.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -25,33 +27,55 @@ DEFAULT_TEMPERATURE = 0.0
 DEFAULT_MAX_TOKENS = 800
 
 # ---------------------------------------------------------------------------
-# Model pricing (EUR per 1M tokens) — longest-prefix match
+# Model pricing (per 1M tokens) — longest-prefix match. The table is
+# operator-local: pricing.json next to this file (see pricing.example.json),
+# gitignored so the repo never publishes prices. Unitless — cost comes out in
+# whatever currency the table was written in.
 # ---------------------------------------------------------------------------
 
-MODEL_PRICING_EUR: dict[str, tuple[float, float]] = {
-    'claude-opus-4': (4.25, 21.25),
-    'claude-fable-5': (8.50, 42.50),  # $10 / $50 — 2x Opus 4.8; thinking always on, billed as output
-    'gpt-5.5': (4.25, 25.50),  # kept for pricing old historical results.json rows
-    'gpt-5.6-sol': (4.25, 25.50),  # $5 / $30 — same EUR price as gpt-5.5, coincidentally
-    'gemini-3.1-pro': (1.70, 10.20),
-    'sonar-deep-research': (1.70, 6.80),
-    'grok-4.3': (1.06, 2.13),  # kept for pricing old historical results.json rows
-    'grok-4.5': (1.70, 5.10),  # $2 / $6
-}
+_PRICING_PATH = Path(__file__).parent / 'pricing.json'
+
+
+def _load_pricing(path: Path) -> tuple[dict[str, tuple[float, float]], bool]:
+    """Return (pricing table, file_missing). Malformed file → ValueError."""
+    if not path.exists():
+        print(f'WARNING: {path.name} not found — cost will read as 0.0 for every '
+              f'call (copy pricing.example.json and fill it in)')
+        return {}, True
+    try:
+        raw = json.loads(path.read_text(encoding='utf-8'))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f'{path.name} is not valid JSON: {exc}') from exc
+    if not isinstance(raw, dict):
+        raise ValueError(f'{path.name} must be a JSON object mapping model prefix to prices')
+    table: dict[str, tuple[float, float]] = {}
+    for key, value in raw.items():
+        if key.startswith('_'):
+            continue
+        if (not isinstance(value, dict)
+                or not isinstance(value.get('input'), (int, float))
+                or not isinstance(value.get('output'), (int, float))):
+            raise ValueError(f'{path.name}: entry {key!r} must be {{"input": <number>, "output": <number>}}')
+        table[key] = (float(value['input']), float(value['output']))
+    return table, False
+
+
+MODEL_PRICING, _PRICING_FILE_MISSING = _load_pricing(_PRICING_PATH)
 
 
 def _lookup_pricing(model: str) -> tuple[float, float]:
     best_prefix = ''
     best_prices = (0.0, 0.0)
-    for prefix, prices in MODEL_PRICING_EUR.items():
+    for prefix, prices in MODEL_PRICING.items():
         if model.startswith(prefix) and len(prefix) > len(best_prefix):
             best_prefix = prefix
             best_prices = prices
-    if not best_prefix:
-        # Silent €0.00 here means a renamed/unrecognized model's entire cost
+    if not best_prefix and not _PRICING_FILE_MISSING:
+        # Silent 0.0 here means a renamed/unrecognized model's entire cost
         # column reads zero with no signal — print loudly so it is seen in
-        # per-cell run output, not just a swallowed log line.
-        print(f'WARNING: no pricing entry for model {model!r} — cost will read as €0.00')
+        # per-cell run output, not just a swallowed log line. (When the whole
+        # pricing file is absent, the load-time warning already said so.)
+        print(f'WARNING: no pricing entry for model {model!r} — cost will read as 0.0')
     return best_prices
 
 
@@ -132,7 +156,7 @@ class LLMProvider(ABC):
     def _complete_inner(self, system: str, user: str, *, json_schema: dict | None = None,
                         max_tokens: int | None = None) -> str: ...
 
-    def cost_eur(self) -> float:
+    def cost(self) -> float:
         usage = self.last_usage or {}
         inp = int(usage.get('input_tokens', 0) or 0)
         out = int(usage.get('output_tokens', 0) or 0)

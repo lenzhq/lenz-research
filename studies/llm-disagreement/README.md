@@ -47,15 +47,20 @@ out. A JSON array of records:
 (streamed as the run progresses; `data/results.json` is the same rows as a final array):
 
 ```json
-{"claim": "...", "date": "2026-03-14", "category": "Science", "verification_id": "4890227d", "model": "gpt-5.6-search", "verdict": "True", "reasoning": "...", "confidence": 9, "cost_eur": 0.0042, "latency_s": 18.3, "error": "", "raw_response": "...", "sources": ["https://..."], "fallback_used": false, "fallback_model": ""}
+{"claim": "...", "date": "2026-03-14", "category": "Science", "verification_id": "4890227d", "model": "gpt-5.6-search", "verdict": "True", "reasoning": "...", "confidence": 9, "cost": 0.0042, "latency_s": 18.3, "error": "", "raw_response": "...", "sources": ["https://..."], "fallback_used": false, "fallback_model": ""}
 ```
 
 An erroring cell carries the same shape with `verdict`/`confidence`/`raw_response`
 empty and `error` set to the exception message.
 
+`cost` is a unitless number: it is computed at harvest time from an
+operator-local pricing table (`pricing.json`, gitignored — see
+`pricing.example.json`), so its unit is whatever currency that table was
+written in. The repo deliberately ships no prices.
+
 `data/results.csv` — the same 5,000 rows as a spreadsheet, for readers who would
 rather not parse JSON. Columns: `claim`, `date`, `category`, `verification_id`,
-`model`, `verdict`, `confidence`, `reasoning`, `sources`, `cost_eur`,
+`model`, `verdict`, `confidence`, `reasoning`, `sources`, `cost`,
 `latency_s`, `error`, `fallback_used`, `fallback_model`. It drops
 `raw_response` (the unparsed provider payload), which stays in the JSON files.
 
@@ -77,7 +82,7 @@ claude-opus-4-8 rather than being recorded as an error. The row still reports
 `"model": "claude-fable-5"` (keeps the 5-model-per-claim panel shape intact),
 but `fallback_used` is `true` and `fallback_model` is `"claude-opus-4-8"` —
 filter on `fallback_used` before treating a row as a genuine Fable 5 answer.
-`cost_eur`/`latency_s` include both the failed primary attempt and the
+`cost`/`latency_s` include both the failed primary attempt and the
 fallback attempt.
 
 ## Reproduce
@@ -91,9 +96,15 @@ From **this directory** (`studies/llm-disagreement/`):
 ```bash
 pip install -r requirements.txt
 cp .env.example .env   # fill in your API keys
+cp pricing.example.json pricing.json   # optional: per-1M-token prices; missing file → cost reads 0.0
 inspect eval task.py -T model_key=claude-fable-5
 inspect view
 ```
+
+Without a filled-in `pricing.json`, every harvested row's `cost` is silently
+`0.0` (one warning is printed at startup). Note that rows you harvest are
+appended to the shared `data/results.jsonl`/`data/results.json` and will carry
+*your* costs — pass `-T out_path=...` to keep them out of the published files.
 
 **Windows:** set `PYTHONIOENCODING=utf-8` before running `inspect eval` /
 `inspect view`. Without it, Inspect's terminal progress display can crash

@@ -362,7 +362,7 @@ def factcheck_solver(model_key: str = 'gpt-5.6-search', done_ids: frozenset[str]
         # all count, per-provider distinction isn't worth the complexity). The
         # row still reports model_key='claude-fable-5' (keeps the panel's
         # 5-model-per-claim join intact for downstream aggregation) but
-        # cost_eur/latency_s/sources fold in the fallback attempt, and
+        # cost/latency_s/sources fold in the fallback attempt, and
         # fallback_used/fallback_model make the substitution fully traceable.
         primary_sources = list(provider.last_sources)
         fallback_used = False
@@ -380,31 +380,31 @@ def factcheck_solver(model_key: str = 'gpt-5.6-search', done_ids: frozenset[str]
                     json_schema=VERDICT_JSON_SCHEMA if fallback_provider.supports_json_schema else None,
                 ) or ''
                 fallback_used = True
-                primary_cost = provider.cost_eur()
+                primary_cost = provider.cost()
                 error = ''
                 provider = fallback_provider
-                cost_eur = primary_cost + provider.cost_eur()
+                cost = primary_cost + provider.cost()
             except Exception as exc:
                 # Both attempts failed — keep the primary's failure reason (the
                 # one downstream refusal-classification keys off, per llm.py's
                 # empty-response RuntimeError comment) instead of discarding it,
                 # and still bill the primary attempt's cost.
-                primary_cost = provider.cost_eur()
+                primary_cost = provider.cost()
                 fallback_error = _scrub_secrets(f'{type(exc).__name__}: {exc}')
                 error = f'{primary_error} | fallback {model_key}->{fallback_model} also failed: {fallback_error}'
                 provider = fallback_provider
-                cost_eur = primary_cost + provider.cost_eur()
+                cost = primary_cost + provider.cost()
         else:
-            cost_eur = provider.cost_eur()
+            cost = provider.cost()
 
         # Merge sources gathered by both attempts — a refused/errored primary
-        # call can still have run web searches before failing, and cost_eur
+        # call can still have run web searches before failing, and cost
         # above already sums both attempts' billing, so sources should too
         # rather than silently dropping the primary's on a fallback.
         sources = primary_sources + [s for s in provider.last_sources if s not in primary_sources]
 
         state.metadata.update({
-            'cost_eur': round(cost_eur, 6),
+            'cost': round(cost, 6),
             'latency_s': round(time.monotonic() - t0, 2),
             'sources': sources,
             'error': error,
@@ -478,7 +478,7 @@ def factcheck_scorer(out_path: str = 'data/results.jsonl'):
             'verdict': verdict,
             'reasoning': reasoning,
             'confidence': confidence,
-            'cost_eur': state.metadata.get('cost_eur', 0.0),
+            'cost': state.metadata.get('cost', 0.0),
             'latency_s': state.metadata.get('latency_s', 0.0),
             'error': row_error,
             'raw_response': raw_response,
@@ -500,14 +500,14 @@ def factcheck_scorer(out_path: str = 'data/results.jsonl'):
             explanation=(
                 f'model={verdict or "none"}  '
                 f'confidence={confidence}  '
-                f'cost=€{state.metadata.get("cost_eur", 0):.4f}  '
+                f'cost={state.metadata.get("cost", 0):.4f}  '
                 f'{state.metadata.get("latency_s", 0):.1f}s\n'
                 f'{reasoning}'
             ),
             metadata={
                 'verdict': verdict,
                 'confidence': confidence,
-                'cost_eur': state.metadata.get('cost_eur', 0.0),
+                'cost': state.metadata.get('cost', 0.0),
                 'latency_s': state.metadata.get('latency_s', 0.0),
                 'sources': state.metadata.get('sources', []),
                 'error': row_error,

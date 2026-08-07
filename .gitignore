@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+studies/llm-disagreement/pricing.json
 __pycache__/
 *.pyc
 *.pyo

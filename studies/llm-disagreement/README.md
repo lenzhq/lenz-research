@@ -85,6 +85,19 @@ derive the distance yourself, pivot on `verification_id`, map each verdict onto
 `True`=0 … `False`=4, and take the maximum minus the minimum across the five
 rows.
 
+**`claim` in this file is authoritative for what each model was shown.** The
+derived per-claim table as first published carried a different string in its
+`atomic_claim` column on 181 of its 997 rows: Lenz re-frames a claim whenever it
+re-runs its own pipeline, and the export read that live field instead of the
+harvest's record of what was sent. Most differences were rewordings, but at
+least one changed a date. The corrected table is published at
+[huggingface.co/datasets/DavidYor06/llm-disagreement](https://huggingface.co/datasets/DavidYor06/llm-disagreement),
+restored from this directory's `data/claims.json` at tag `llm-disagreement-v1.1`;
+the copy served from lenz.io still carries the superseded text pending redeploy.
+No verdict, confidence or published statistic was affected — those come from the
+harvest rows here, which were never rewritten. If the two sources ever disagree
+on claim text, this one is correct.
+
 **claude-fable-5 fallback:** any failed claude-fable-5 call (safety-classifier
 refusal, timeout, rate limit, the ZDR-retention 400, etc.) retries once against
 claude-opus-4-8 rather than being recorded as an error. The row still reports

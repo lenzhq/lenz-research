@@ -1,0 +1,35 @@
+name: pr-title
+
+# Squash merges take the pull request's title as the commit subject, so the
+# title is checked the way a commit message would be: a conventional-commit type,
+# an optional scope, then the subject.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  pr-title:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            refactor
+            test
+            ci
+            build
+            chore
+            perf
+            revert
+            style
+            release
+            data

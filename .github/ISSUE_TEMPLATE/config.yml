@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Account, billing or API support
+    url: https://lenz.io/contact
+    about: Questions about your Lenz account, credits, billing or API access go to the Lenz team here, not to a public issue.
+  - name: Report a security vulnerability
+    url: https://github.com/lenzhq/lenz-research/security/advisories/new
+    about: Please report vulnerabilities privately, never in a public issue.
